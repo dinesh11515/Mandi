@@ -83,7 +83,6 @@ export const config = {
   x402: {
     network: "hedera:testnet" as const,
     facilitatorUrl: env("X402_FACILITATOR_URL") || "https://api.testnet.blocky402.com",
-    paymentFlow: env("X402_PAYMENT_FLOW") || "authorization",
   },
   failModes: parseFailModes(env("MANDI_FAIL")),
   upstreamTimeoutMs: Number(env("UPSTREAM_TIMEOUT_MS") || 8000),

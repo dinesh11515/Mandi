@@ -1,10 +1,18 @@
 import { Hono } from "hono";
 import { config, supplierByLabel } from "../config";
 import { assess } from "./assess";
+import { x402Gate } from "./x402";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const market = new Hono();
+
+market.use("/:label/*", async (c, next) => {
+  if (!supplierByLabel(c.req.param("label"))) return c.json({ error: `unknown supplier ${c.req.param("label")}` }, 404);
+  await next();
+});
+
+market.use("*", x402Gate);
 
 async function handle(label: string, protocol: string, deep: boolean) {
   const supplier = supplierByLabel(label);
