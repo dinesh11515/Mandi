@@ -1,7 +1,9 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { config } from "./config";
+import { run } from "./buyer/agent";
 import { executeIntent } from "./buyer/executor";
 import { activatePolicy, describeActivation, getActivePolicy } from "./buyer/policy";
 import { directory, resolveService } from "./ens";
@@ -48,6 +50,17 @@ app.post("/intent", async (c) => {
   } catch (err) {
     return c.json({ error: message(err) }, 400);
   }
+});
+
+app.get("/run", (c) => {
+  const task = c.req.query("task") ?? "";
+  const policyHash = c.req.query("policyHash") ?? "";
+  if (!task || !policyHash) return c.json({ error: "task and policyHash query params required" }, 400);
+  return streamSSE(c, async (stream) => {
+    for await (const ev of run(task, policyHash)) {
+      await stream.writeSSE({ event: ev.stage, data: JSON.stringify(ev) });
+    }
+  });
 });
 
 app.get("/resolve/:name", async (c) => {
