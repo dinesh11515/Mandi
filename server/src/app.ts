@@ -2,10 +2,12 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { z } from "zod";
 import { config } from "./config";
+import { evaluateIntent } from "./buyer/executor";
 import { activatePolicy, describeActivation, getActivePolicy } from "./buyer/policy";
 import { directory, resolveService } from "./ens";
 import { registerReceiptHooks } from "./market/receipts";
 import { market } from "./market/routes";
+import { PurchaseIntentSchema } from "./types";
 
 registerReceiptHooks();
 
@@ -37,6 +39,15 @@ app.post("/policy/activate", async (c) => {
 app.get("/policy/:hash", (c) => {
   const entry = getActivePolicy(c.req.param("hash"));
   return entry ? c.json(describeActivation(entry)) : c.json({ error: "no active policy with that hash" }, 404);
+});
+
+app.post("/intent", async (c) => {
+  try {
+    const intent = PurchaseIntentSchema.parse(await c.req.json());
+    return c.json(await evaluateIntent(intent));
+  } catch (err) {
+    return c.json({ error: message(err) }, 400);
+  }
 });
 
 app.get("/resolve/:name", async (c) => {

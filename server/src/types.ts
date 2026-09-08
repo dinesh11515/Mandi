@@ -41,18 +41,31 @@ export type ServiceCard = z.infer<typeof ServiceCardSchema>;
 export const PurchaseIntentSchema = z.object({
   supplier: z.string().min(1),
   route: z.string().min(1),
-  policy: PolicySchema,
+  policyHash: z.string().length(64),
 });
 
 export type PurchaseIntent = z.infer<typeof PurchaseIntentSchema>;
 
 export const DecisionStatusSchema = z.enum(["approved", "rejected"]);
 
+export const CheckSchema = z.object({
+  name: z.string().min(1),
+  passed: z.boolean(),
+  detail: z.string(),
+});
+
 export const DecisionSchema = z.object({
   status: DecisionStatusSchema,
   reasons: z.array(z.string()),
   supplier: z.string().min(1),
+  route: z.string().min(1),
+  policyHash: z.string().length(64),
+  priceHbar: z.number().nonnegative(),
+  checks: z.array(CheckSchema),
+  ts: z.number().int().nonnegative(),
 });
+
+export type Check = z.infer<typeof CheckSchema>;
 
 export type DecisionStatus = z.infer<typeof DecisionStatusSchema>;
 export type Decision = z.infer<typeof DecisionSchema>;
