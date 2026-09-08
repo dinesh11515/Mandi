@@ -4,15 +4,16 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { config } from "./config";
 import { run } from "./buyer/agent";
-import { executeIntent } from "./buyer/executor";
+import { executeIntent, lookups } from "./buyer/executor";
 import { activatePolicy, describeActivation, getActivePolicy } from "./buyer/policy";
-import { directory, resolveService } from "./ens";
+import { directory, labelOf, resolveService } from "./ens";
 import { registerReceiptHooks } from "./market/receipts";
 import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
 import { PurchaseIntentSchema } from "./types";
 
 registerReceiptHooks();
+lookups.reliability = (name) => reliabilityFor(labelOf(name));
 
 export const app = new Hono();
 
