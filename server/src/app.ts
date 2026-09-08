@@ -11,10 +11,11 @@ import { registerReceiptHooks } from "./market/receipts";
 import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
 import { PurchaseIntentSchema } from "./types";
-import { getAttestation, rpContext, verifyAndAttest, verifyAttestation } from "./world";
+import { attestationLookup, getAttestation, rpContext, verifyAndAttest, verifyAttestation } from "./world";
 
 registerReceiptHooks();
 lookups.reliability = (name) => reliabilityFor(labelOf(name));
+lookups.attestation = attestationLookup;
 
 export const app = new Hono();
 
