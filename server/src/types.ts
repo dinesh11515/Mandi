@@ -41,6 +41,7 @@ export type ServiceCard = z.infer<typeof ServiceCardSchema>;
 export const PurchaseIntentSchema = z.object({
   supplier: z.string().min(1),
   route: z.string().min(1),
+  protocol: z.string().min(1),
   policyHash: z.string().length(64),
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide, type DecisionContext } from "../src/buyer/executor";
+import { acceptFilter, decide, type DecisionContext } from "../src/buyer/executor";
 import { SAMPLE_POLICY, type ServiceCard } from "../src/types";
 
 const card: ServiceCard = {
@@ -72,5 +72,17 @@ describe("decide", () => {
     const d = decide(intent, ctx({ card: { ...card, chain: "eip155:1" } }));
     expect(d.status).toBe("rejected");
     expect(d.reasons[0]).toMatch(/^identity:/);
+  });
+});
+
+describe("acceptFilter", () => {
+  const req = (amount: string, asset = "0.0.0", network = "hedera:testnet") =>
+    ({ scheme: "exact", network, asset, amount, payTo: "0.0.1", maxTimeoutSeconds: 60, extra: {} }) as never;
+
+  it("keeps only HBAR requirements on hedera:testnet at or under the cap", () => {
+    const filter = acceptFilter(0.05);
+    const kept = filter([req("5000000"), req("5000001"), req("1000", "0.0.429274"), req("1000", "0.0.0", "hedera:mainnet")]);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.amount).toBe("5000000");
   });
 });

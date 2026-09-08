@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { z } from "zod";
 import { config } from "./config";
-import { evaluateIntent } from "./buyer/executor";
+import { executeIntent } from "./buyer/executor";
 import { activatePolicy, describeActivation, getActivePolicy } from "./buyer/policy";
 import { directory, resolveService } from "./ens";
 import { registerReceiptHooks } from "./market/receipts";
@@ -44,7 +44,7 @@ app.get("/policy/:hash", (c) => {
 app.post("/intent", async (c) => {
   try {
     const intent = PurchaseIntentSchema.parse(await c.req.json());
-    return c.json(await evaluateIntent(intent));
+    return c.json(await executeIntent(intent));
   } catch (err) {
     return c.json({ error: message(err) }, 400);
   }
