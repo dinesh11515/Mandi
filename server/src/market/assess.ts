@@ -1,4 +1,5 @@
 import type { Depth } from "../config";
+import { fetchMetrics, graphEnabled, score, subgraphFor } from "./graph";
 
 export type Assessment = {
   riskScore: number;
@@ -15,24 +16,25 @@ function seed(text: string): number {
   return h / 0xffffffff;
 }
 
-function bucket(score: number): Assessment["liquidityRisk"] {
-  if (score < 34) return "low";
-  if (score < 67) return "medium";
+function bucket(value: number): Assessment["liquidityRisk"] {
+  if (value < 34) return "low";
+  if (value < 67) return "medium";
   return "high";
 }
 
-export async function assess(protocol: string, depth: Depth, deep: boolean): Promise<Assessment> {
-  const base = seed(protocol);
+function placeholder(protocol: string, depth: Depth, deep: boolean, reason: string): Assessment {
   const metrics = depth === "pro" ? ["tvl", "utilization", "liquidity"] : ["tvl"];
   if (deep) metrics.push("volatility30d");
-  const riskScore = Math.round(20 + base * 60);
+  const riskScore = Math.round(20 + seed(protocol) * 60);
   return {
     riskScore,
     liquidityRisk: bucket(riskScore),
-    notes: [
-      `protocol=${protocol}`,
-      `metrics=${metrics.join(",")}`,
-      "static placeholder scores until live subgraph data lands",
-    ],
+    notes: [`protocol=${protocol}`, `metrics=${metrics.join(",")}`, `placeholder score: ${reason}`],
   };
+}
+
+export async function assess(protocol: string, depth: Depth, deep: boolean): Promise<Assessment> {
+  if (!graphEnabled()) return placeholder(protocol, depth, deep, "GRAPH_API_KEY not configured");
+  if (!subgraphFor(protocol)) return placeholder(protocol, depth, deep, `no Messari subgraph mapped for ${protocol}`);
+  return score(await fetchMetrics(protocol, depth, deep));
 }
