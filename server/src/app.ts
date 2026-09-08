@@ -1,7 +1,10 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { config } from "./config";
+import { registerReceiptHooks } from "./market/receipts";
 import { market } from "./market/routes";
+
+registerReceiptHooks();
 
 export const app = new Hono();
 

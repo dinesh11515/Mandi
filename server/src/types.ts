@@ -61,12 +61,14 @@ export const ReceiptSchema = z.object({
   supplier: z.string().min(1),
   route: z.string().min(1),
   amountHbar: HbarAmountSchema,
-  txId: z.string().min(1),
+  txId: z.string().nullable(),
   settled: z.boolean(),
   fulfilled: z.boolean(),
   latencyMs: z.number().nonnegative(),
   ts: z.number().int().nonnegative(),
   policyHash: z.string().nullable(),
+  status: z.number().int().optional(),
+  error: z.string().optional(),
 });
 
 export type Receipt = z.infer<typeof ReceiptSchema>;
