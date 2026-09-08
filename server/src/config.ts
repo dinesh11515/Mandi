@@ -84,6 +84,15 @@ export const config = {
     network: "hedera:testnet" as const,
     facilitatorUrl: env("X402_FACILITATOR_URL") || "https://api.testnet.blocky402.com",
   },
+  ens: {
+    rpcUrl: env("SEPOLIA_RPC_URL"),
+    parentLabel: env("ENS_PARENT_LABEL") || "mandi",
+    parentName: `${env("ENS_PARENT_LABEL") || "mandi"}.eth`,
+    subregistry: env("ENS_SUBREGISTRY"),
+    resolver: env("ENS_RESOLVER"),
+    fromBlock: env("ENS_FROM_BLOCK"),
+    sellerAddress: env("SELLER_EVM_ADDRESS"),
+  },
   failModes: parseFailModes(env("MANDI_FAIL")),
   upstreamTimeoutMs: Number(env("UPSTREAM_TIMEOUT_MS") || 8000),
 };
