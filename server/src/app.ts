@@ -1,5 +1,7 @@
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { config } from "./config";
@@ -18,6 +20,8 @@ lookups.reliability = (name) => reliabilityFor(labelOf(name));
 lookups.attestation = attestationLookup;
 
 export const app = new Hono();
+
+app.use("*", cors());
 
 const message = (err: unknown) =>
   err instanceof z.ZodError ? z.prettifyError(err) : err instanceof Error ? err.message : String(err);
@@ -113,6 +117,11 @@ app.get("/resolve/:name", async (c) => {
     return c.json({ error: message(err) }, 404);
   }
 });
+
+if (config.webDist) {
+  app.use("/*", serveStatic({ root: config.webDist }));
+  app.get("*", serveStatic({ path: `${config.webDist}/index.html` }));
+}
 
 serve({ fetch: app.fetch, port: config.port }, () => {
   console.log(`mandi server listening on ${config.publicUrl}`);

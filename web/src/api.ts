@@ -1,6 +1,8 @@
 import type { Decision, Policy, ServiceCard } from "../../server/src/types";
 
-export const API = (import.meta.env.VITE_API_URL as string | undefined) ?? "/api";
+const configuredApi = import.meta.env.VITE_API_URL as string | undefined;
+
+export const API = configuredApi === undefined ? "/api" : configuredApi;
 
 export type Reliability = {
   supplier: string;

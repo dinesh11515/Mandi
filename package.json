@@ -6,7 +6,8 @@
     "dev": "pnpm --filter @mandi/server dev",
     "test": "pnpm --filter @mandi/server test",
     "typecheck": "pnpm -r typecheck",
-    "build": "pnpm --filter @mandi/web build"
+    "build": "pnpm --filter @mandi/web build",
+    "start": "pnpm --filter @mandi/server start"
   },
   "engines": {
     "node": ">=22",

@@ -94,6 +94,7 @@ export const config = {
     sellerAddress: env("SELLER_EVM_ADDRESS"),
   },
   graphApiKey: env("GRAPH_API_KEY"),
+  webDist: env("WEB_DIST"),
   failModes: parseFailModes(env("MANDI_FAIL")),
   upstreamTimeoutMs: Number(env("UPSTREAM_TIMEOUT_MS") || 8000),
 };
