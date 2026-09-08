@@ -235,5 +235,25 @@ export async function registeredLabels(): Promise<string[]> {
   return [...scan.labels];
 }
 
+let directoryCache: { at: number; cards: ServiceCard[] } | undefined;
+
+export async function directory(capability?: string): Promise<string[]> {
+  if (!directoryCache || Date.now() - directoryCache.at > 60_000) {
+    const labels = await registeredLabels();
+    const cards: ServiceCard[] = [];
+    for (const label of labels) {
+      try {
+        cards.push(await resolveService(serviceName(label)));
+      } catch (err) {
+        console.warn(`directory skip ${label}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    directoryCache = { at: Date.now(), cards };
+  }
+  return directoryCache.cards
+    .filter((card) => !capability || card.capability === capability)
+    .map((card) => card.name);
+}
+
 export const nodeOf = (name: string) => namehash(normalize(name));
 export const labelIdOf = (label: string) => BigInt(labelhash(label));
