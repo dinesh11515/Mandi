@@ -235,6 +235,18 @@ export async function registeredLabels(): Promise<string[]> {
   return [...scan.labels];
 }
 
+export async function setTextRecord(name: string, key: string, value: string): Promise<string> {
+  const wallet = walletClient();
+  const hash = await wallet.writeContract({
+    address: resolverAddress(),
+    abi: resolverAbi,
+    functionName: "setText",
+    args: [nodeOf(name), key, value],
+  });
+  await publicClient().waitForTransactionReceipt({ hash });
+  return hash;
+}
+
 let directoryCache: { at: number; cards: ServiceCard[] } | undefined;
 
 export async function directory(capability?: string): Promise<string[]> {

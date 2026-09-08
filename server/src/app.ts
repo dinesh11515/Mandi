@@ -11,6 +11,7 @@ import { registerReceiptHooks } from "./market/receipts";
 import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
 import { PurchaseIntentSchema } from "./types";
+import { getAttestation, rpContext, verifyAndAttest, verifyAttestation } from "./world";
 
 registerReceiptHooks();
 lookups.reliability = (name) => reliabilityFor(labelOf(name));
@@ -79,6 +80,29 @@ app.get("/reliability/:name", async (c) => {
   } catch (err) {
     return c.json({ error: message(err) }, 503);
   }
+});
+
+app.post("/world/rp-signature", (c) => {
+  try {
+    return c.json(rpContext());
+  } catch (err) {
+    return c.json({ error: message(err) }, 400);
+  }
+});
+
+app.post("/world/verify", async (c) => {
+  try {
+    const body = (await c.req.json()) as { label: string; wallet: `0x${string}`; idkitResponse: unknown };
+    return c.json(await verifyAndAttest(body));
+  } catch (err) {
+    return c.json({ error: message(err) }, 400);
+  }
+});
+
+app.get("/attestation/:name", async (c) => {
+  const record = getAttestation(c.req.param("name"));
+  if (!record) return c.json({ error: "no attestation for that name" }, 404);
+  return c.json({ ...(await verifyAttestation(record)), attestation: record });
 });
 
 app.get("/resolve/:name", async (c) => {
