@@ -14,7 +14,7 @@ market.use("/:label/*", async (c, next) => {
 
 market.use("*", x402Gate);
 
-async function handle(label: string, protocol: string, deep: boolean) {
+export async function handle(label: string, protocol: string, deep: boolean) {
   const supplier = supplierByLabel(label);
   if (!supplier) return { status: 404 as const, body: { error: `unknown supplier ${label}` } };
   if (!protocol) return { status: 400 as const, body: { error: "protocol query param required" } };
