@@ -82,7 +82,8 @@ export async function mirrorMessages(topicId = config.hedera.topicId): Promise<H
 }
 
 export function hashscanTx(txId: string): string {
-  return `https://hashscan.io/${config.hedera.network}/transaction/${txId}`;
+  const normalized = txId.replace("@", "-").replace(/\.(\d+)$/, "-$1");
+  return `https://hashscan.io/${config.hedera.network}/transaction/${normalized}`;
 }
 
 export function hashscanTopic(topicId: string): string {
