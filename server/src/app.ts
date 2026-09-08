@@ -8,6 +8,7 @@ import { executeIntent } from "./buyer/executor";
 import { activatePolicy, describeActivation, getActivePolicy } from "./buyer/policy";
 import { directory, resolveService } from "./ens";
 import { registerReceiptHooks } from "./market/receipts";
+import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
 import { PurchaseIntentSchema } from "./types";
 
@@ -61,6 +62,22 @@ app.get("/run", (c) => {
       await stream.writeSSE({ event: ev.stage, data: JSON.stringify(ev) });
     }
   });
+});
+
+app.get("/reliability", async (c) => {
+  try {
+    return c.json({ source: reliabilitySource(), suppliers: [...(await reliabilityIndex()).values()] });
+  } catch (err) {
+    return c.json({ error: message(err) }, 503);
+  }
+});
+
+app.get("/reliability/:name", async (c) => {
+  try {
+    return c.json({ source: reliabilitySource(), ...(await reliabilityFor(c.req.param("name").split(".")[0]!)) });
+  } catch (err) {
+    return c.json({ error: message(err) }, 503);
+  }
 });
 
 app.get("/resolve/:name", async (c) => {
