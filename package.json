@@ -3,14 +3,13 @@
   "private": true,
   "packageManager": "pnpm@11.1.2",
   "scripts": {
-    "build": "pnpm -r build",
-    "test": "pnpm --filter @mandi/shared test"
+    "dev": "pnpm --filter @mandi/server dev",
+    "test": "pnpm --filter @mandi/server test",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm --filter @mandi/web build"
   },
   "engines": {
     "node": ">=22",
     "pnpm": ">=11"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
   }
 }

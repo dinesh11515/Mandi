@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { PolicySchema, SAMPLE_POLICY } from "./policy.js";
+import { PolicySchema, SAMPLE_POLICY } from "../src/types";
 
 describe("PolicySchema", () => {
-  it("parses the §3.4 sample policy", () => {
+  it("parses the sample policy", () => {
     const parsed = PolicySchema.parse(SAMPLE_POLICY);
     expect(parsed).toEqual({
       budgetTotal: "1 HBAR",
@@ -14,12 +14,8 @@ describe("PolicySchema", () => {
   });
 
   it("rejects a malformed policy", () => {
-    expect(PolicySchema.safeParse({ ...SAMPLE_POLICY, minSuccessRate: 1.5 }).success).toBe(
-      false,
-    );
-    expect(PolicySchema.safeParse({ ...SAMPLE_POLICY, budgetTotal: "1" }).success).toBe(
-      false,
-    );
+    expect(PolicySchema.safeParse({ ...SAMPLE_POLICY, minSuccessRate: 1.5 }).success).toBe(false);
+    expect(PolicySchema.safeParse({ ...SAMPLE_POLICY, budgetTotal: "1" }).success).toBe(false);
     expect(
       PolicySchema.safeParse({
         maxPerCall: SAMPLE_POLICY.maxPerCall,
