@@ -85,4 +85,9 @@ describe("acceptFilter", () => {
     expect(kept).toHaveLength(1);
     expect(kept[0]!.amount).toBe("5000000");
   });
+
+  it("keeps every HBAR requirement when the cap is infinite", () => {
+    const kept = acceptFilter(Number.POSITIVE_INFINITY)([req("5000000"), req("99999999999")]);
+    expect(kept).toHaveLength(2);
+  });
 });

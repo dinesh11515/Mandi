@@ -30,10 +30,10 @@ function buyerSigner(): ClientHederaSigner {
 }
 
 export function acceptFilter(capHbar: number): (reqs: readonly PaymentRequirements[]) => PaymentRequirements[] {
-  const cap = toTinybar(capHbar);
+  const cap = Number.isFinite(capHbar) ? toTinybar(capHbar) : null;
   return (reqs) =>
     reqs.filter(
-      (r) => r.network === config.x402.network && r.asset === HBAR_ASSET && BigInt(r.amount) <= cap,
+      (r) => r.network === config.x402.network && r.asset === HBAR_ASSET && (cap === null || BigInt(r.amount) <= cap),
     );
 }
 
