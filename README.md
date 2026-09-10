@@ -164,15 +164,23 @@ Deploy with the root `Dockerfile` (Railway, Render, Fly) for a single URL, or de
 
 ## Status
 
-| Verified locally (no keys) | Needs a funded `.env` |
+Verified live on Sept 10, 2026, from a laptop against Hedera testnet and ENSv2 Sepolia:
+
+| Artifact | Where to look |
 |---|---|
-| 402 challenges quote per-route HBAR prices with Blocky402 testnet's fee payer merged in | First settled paid call (`pay-once`), HashScan transfer |
-| ENSv2 Sepolia reads: registrar availability and price for `mandi.eth`, universal-resolver resolution, `LabelRegistered` decoding | Resolver and subregistry deploys, parent registration, three subname mints, record writes |
-| Policy hashing, mandate signing, expired and forged mandates rejected | `POLICY_ACTIVATED` anchored on HCS |
-| Executor decisions (cap, budget, reliability, verification, identity) and the accept filter | `DECISION` and `RECEIPT` on HCS for a live run |
-| Agent loop: cheapest eligible, verified-first, fallback, refusal, no-fallback stop | Reliability index from the mirror node after real traffic |
-| Supplier fail modes, subgraph scoring, attestation issue and verify | Selfie Check on the Sandbox app; live subgraph numbers |
-| Web console and `/seller` build; served from the server at one URL | Public deployment URLs |
+| HCS topic with `POLICY_ACTIVATED`, `DECISION`, and `RECEIPT` messages | https://hashscan.io/testnet/topic/0.0.10454931 |
+| `mandi.eth` on the ENSv2 Sepolia beta, with its subregistry and resolver | https://explorer.ens.dev/name/mandi.eth · subregistry `0x1C1137d4Cf35c988461d708067d0b1663631B435` · resolver `0xb6F5434b108cdD21Dcd9Bf52D0557cA3929ca013` |
+| The three suppliers with ENSIP-26 and `mandi:*` records | https://explorer.ens.dev/name/risk-basic.mandi.eth · risk-pro.mandi.eth · risk-pro-2.mandi.eth |
+| A settled x402 payment through Blocky402 testnet (fee payer `0.0.7162784`, buyer `0.0.10454835`) | https://hashscan.io/testnet/transaction/0.0.7162784-1789025192-909232105 |
+| The `DECISION` and `RECEIPT` for that payment, joined by the same transaction id and policy hash | topic messages 7 and 8 |
+
+Live runs completed end to end: a normal procurement (`risk-pro` chosen on its 100% record, paid, fulfilled), a forced failure (`risk-pro` timed out, payment cancelled, `risk-basic` rejected on a 50% success rate, `risk-pro-2` paid instead, 0.04 HBAR total), and a refusal (`maxPerCall` 0.01 HBAR, all three rejected with reasons, nothing paid). Topic messages 1 and 2 were emitted by the test suite before tests were isolated from `.env`; they carry no decisions.
+
+Still pending:
+
+- A working `GRAPH_API_KEY`. Until then the suppliers return placeholder scores that say so in `notes`, and the Graph track is not claimable.
+- A public deployment. The supplier endpoints in ENS still point at `http://localhost:3000`; re-run `register-service` for each label after setting `PUBLIC_URL`.
+- Selfie Check on the World ID Sandbox app, which needs the beta flag and a phone.
 
 ## Roadmap
 
