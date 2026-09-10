@@ -1,9 +1,11 @@
 import path from "node:path";
 import { loadEnvFile } from "node:process";
 
-try {
-  loadEnvFile(path.resolve(import.meta.dirname, "../../.env"));
-} catch {}
+if (!process.env.VITEST) {
+  try {
+    loadEnvFile(path.resolve(import.meta.dirname, "../../.env"));
+  } catch {}
+}
 
 const env = (name: string): string => process.env[name] ?? "";
 
