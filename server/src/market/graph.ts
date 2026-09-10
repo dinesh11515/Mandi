@@ -137,17 +137,13 @@ export function score(m: Metrics): Scored {
     if (m.dailyActiveUsers < 50) risk += 5;
   }
   const riskScore = Math.max(0, Math.min(100, risk));
-  const liquidityRisk =
-    m.utilization !== null
-      ? m.utilization >= 0.9
-        ? "high"
-        : m.utilization >= 0.75
-          ? "medium"
-          : "low"
-      : m.tvlUsd < 1e8
-        ? "high"
-        : m.tvlUsd < 1e9
-          ? "medium"
-          : "low";
-  return { riskScore, liquidityRisk, notes };
+  return { riskScore, liquidityRisk: liquidityBucket(m), notes };
+}
+
+const LEVELS = ["low", "medium", "high"] as const;
+
+function liquidityBucket(m: Metrics): Scored["liquidityRisk"] {
+  const byUtilization = m.utilization === null ? 0 : m.utilization >= 0.9 ? 2 : m.utilization >= 0.75 ? 1 : 0;
+  const byTvl = m.tvlUsd < 1e7 ? 2 : m.tvlUsd < 1e8 ? 1 : 0;
+  return LEVELS[Math.max(byUtilization, byTvl)]!;
 }

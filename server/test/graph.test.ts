@@ -42,6 +42,13 @@ describe("parseMetrics + score", () => {
     expect(s.notes.some((n) => n.startsWith("daily liquidations="))).toBe(true);
   });
 
+  it("never calls a tiny protocol low liquidity risk", () => {
+    const m = parseMetrics("morpho", SUBGRAPHS.morpho!, [protocolRow("25000", "26000", "400")]);
+    expect(score(m).liquidityRisk).toBe("high");
+    const mid = parseMetrics("aave", aave, [protocolRow("50000000", "60000000", "10000000")]);
+    expect(score(mid).liquidityRisk).toBe("medium");
+  });
+
   it("handles the generic schema without utilization", () => {
     const m = parseMetrics("lido", SUBGRAPHS.lido!, [{ protocols: [{ name: "Lido", totalValueLockedUSD: "25000000000" }] }]);
     expect(m.utilization).toBeNull();
