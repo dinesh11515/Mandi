@@ -61,6 +61,8 @@ Prerequisites: Node 22, pnpm 11, a funded Hedera testnet account (portal.hedera.
 pnpm install
 cp .env.example .env            # fill in the values below
 cd server
+pnpm exec tsx scripts/keygen.ts                      # HUMAN_KEY and VERIFIER_KEY
+pnpm exec tsx scripts/hedera-account.ts BUYER        # funded buyer account from the operator
 pnpm exec tsx scripts/hedera-init.ts                 # creates the HCS topic, checks the facilitator
 pnpm exec tsx scripts/ens-setup.ts                   # resolver, subregistry, mandi.eth on ENSv2 Sepolia
 pnpm exec tsx scripts/register-service.ts risk-basic # mints <label>.mandi.eth and sets the records
@@ -76,20 +78,47 @@ Run the tests with `pnpm test` (37 cases: policy hashing and activation, executo
 
 ### Environment
 
-| Variable | Used by |
-|---|---|
-| `HEDERA_OPERATOR_ID`, `HEDERA_OPERATOR_KEY`, `HCS_TOPIC_ID` | HCS writes and reads (`hedera-init` prints the topic id) |
-| `SELLER_ACCOUNT_ID` (or `PAYTO_RISK_BASIC` etc.) | x402 `payTo` for each supplier |
-| `BUYER_ACCOUNT_ID`, `BUYER_KEY` | The executor's payment signer, read only in `executor.ts` |
-| `X402_FACILITATOR_URL` | Defaults to `https://api.testnet.blocky402.com` |
-| `SEPOLIA_RPC_URL`, `SEPOLIA_PRIVATE_KEY` | ENSv2 deploys, registrations, record writes; reads work with the public RPC |
-| `ENS_PARENT_LABEL`, `ENS_SUBREGISTRY`, `ENS_RESOLVER`, `ENS_FROM_BLOCK` | Printed by `ens-setup`; addresses are also derived deterministically from the deployer |
-| `HUMAN_KEY` | Signs the policy mandate on activation |
-| `VERIFIER_KEY` | Signs supplier attestations after Selfie Check |
-| `GRAPH_API_KEY` | Messari subgraph queries. Without it suppliers return clearly labelled placeholder scores |
-| `WORLD_APP_ID`, `WORLD_RP_ID`, `WORLD_SIGNING_KEY`, `WORLD_ACTION` | Selfie Check request signing and proof verification |
-| `MANDI_FAIL` | Demo switch, e.g. `risk-pro:timeout`, makes a supplier fail after authorization |
-| `WEB_DIST` | Set to `../web/dist` to serve the built console from the server (one URL) |
+`.env.example` lists only what you must fill. Everything else has a default.
+
+**Required for the core demo (Hedera payment + ENS identity)**
+
+| Variable | What it is | How to get it |
+|---|---|---|
+| `PUBLIC_URL` | The URL agents pay. Written into every supplier's `agent-endpoint[x402]` record and used by `pay-once` and `traffic` | `http://localhost:3000` locally. After deploying, set it to the server URL and re-run `register-service` for each supplier |
+| `HEDERA_OPERATOR_ID`, `HEDERA_OPERATOR_KEY` | Account that pays HCS fees and creates the topic | portal.hedera.com → create a testnet account → copy the account id and the ECDSA private key (hex or DER both work) |
+| `SELLER_ACCOUNT_ID` | Where supplier payments land (`payTo`) | Use the operator id, or create a separate account with `scripts/hedera-account.ts SELLER` |
+| `BUYER_ACCOUNT_ID`, `BUYER_KEY` | The executor's payment signer. Must differ from the seller | `pnpm exec tsx scripts/hedera-account.ts BUYER` creates and funds it from the operator and prints both lines |
+| `HCS_TOPIC_ID` | Topic that holds receipts and decisions | Printed by `scripts/hedera-init.ts` |
+| `SEPOLIA_RPC_URL` | Sepolia JSON-RPC. The public default rate-limits log scans | Free app on Alchemy or Infura → Sepolia HTTPS URL |
+| `SEPOLIA_PRIVATE_KEY` | Deploys the resolver and subregistry, registers `mandi.eth`, mints subnames, writes records | Export from a throwaway MetaMask account or `scripts/keygen.ts SEPOLIA_PRIVATE_KEY`, then fund it with about 0.05 Sepolia ETH from the Google Cloud or Alchemy faucet |
+| `ENS_SUBREGISTRY`, `ENS_RESOLVER`, `ENS_FROM_BLOCK` | Your subregistry, your resolver, and the block to scan registrations from | Printed by `scripts/ens-setup.ts` |
+| `HUMAN_KEY` | Signs the policy mandate on activation. Needs no funds | `pnpm exec tsx scripts/keygen.ts` |
+| `VERIFIER_KEY` | Signs supplier attestations after Selfie Check. Needs no funds. Without it every `requireVerifiedFor` check fails | Same `keygen` run |
+
+**Required per sponsor track**
+
+| Variable | Track | How to get it |
+|---|---|---|
+| `GRAPH_API_KEY` | The Graph, and the video. Without it suppliers return placeholder scores that say so in `notes` | thegraph.com/studio → API Keys → Create. The free allowance covers the demo |
+| `WORLD_RP_ID`, `WORLD_SIGNING_KEY` | World. Signs each Selfie Check request and names the app to the verify endpoint | developer.world.org → your app → Enable World ID 4.0 → copy `rp_id` and the one-time signing key |
+| `VITE_WORLD_APP_ID` (in `web/.env`) | World. The widget's app id | Same app page → App ID |
+
+**Optional, with defaults**
+
+| Variable | Default | When to set |
+|---|---|---|
+| `PORT` | `3000` | Hosts usually inject it |
+| `WEB_DIST` | unset | `../web/dist` to serve the console from the server (the Dockerfile sets it) |
+| `VITE_API_URL` (web) | `/api` | Empty for same-origin serving, or the server URL for a Vercel deploy |
+| `X402_FACILITATOR_URL` | `https://api.testnet.blocky402.com` | Only to point at another facilitator |
+| `HEDERA_NETWORK`, `HEDERA_MIRROR_URL` | `testnet`, `https://testnet.mirrornode.hedera.com` | Mainnet only |
+| `ENS_PARENT_LABEL` | `mandi` | If `mandi` is taken on the beta |
+| `SELLER_EVM_ADDRESS` | the Sepolia deployer | To mint subnames to a different seller wallet |
+| `PAYTO_RISK_BASIC`, `PAYTO_RISK_PRO`, `PAYTO_RISK_PRO_2` | `SELLER_ACCOUNT_ID` | One Hedera account per supplier |
+| `WORLD_ACTION` | `mandi-supplier-accreditation` | Keep stable; nullifiers are per action |
+| `ATTESTATION_FILE` | `server/data/attestations.json` | A mounted volume path on the host |
+| `UPSTREAM_TIMEOUT_MS` | `8000` | Client-side timeout for supplier calls |
+| `MANDI_FAIL` | unset | Demo switch, e.g. `risk-pro:timeout` or `risk-basic:error`, makes a supplier fail after authorization |
 
 Deploy with the root `Dockerfile` (Railway, Render, Fly) for a single URL, or deploy `web/` to Vercel with `VITE_API_URL` pointing at the server.
 
