@@ -176,9 +176,10 @@ Verified live on Sept 10, 2026, from a laptop against Hedera testnet and ENSv2 S
 
 Live runs completed end to end: a normal procurement (`risk-pro` chosen on its 100% record, paid, fulfilled), a forced failure (`risk-pro` timed out, payment cancelled, `risk-basic` rejected on a 50% success rate, `risk-pro-2` paid instead, 0.04 HBAR total), and a refusal (`maxPerCall` 0.01 HBAR, all three rejected with reasons, nothing paid). Topic messages 1 and 2 were emitted by the test suite before tests were isolated from `.env`; they carry no decisions.
 
+Live subgraph data confirmed through paid calls on Sept 10: `Assess risk of Aave` returned TVL, utilization, available liquidity, an 8-day TVL trend, liquidations and active users from `messari/aave-v3-ethereum` (risk 10, low), and `Assess risk of Morpho` scored the dormant `morpho-aave-v3-ethereum` market at risk 60, high, on $25k of TVL and a 100% drawdown.
+
 Still pending:
 
-- A working `GRAPH_API_KEY`. Until then the suppliers return placeholder scores that say so in `notes`, and the Graph track is not claimable.
 - A public deployment. The supplier endpoints in ENS still point at `http://localhost:3000`; re-run `register-service` for each label after setting `PUBLIC_URL`.
 - Selfie Check on the World ID Sandbox app, which needs the beta flag and a phone.
 
