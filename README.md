@@ -178,9 +178,19 @@ The last two lines rewrite the ENS endpoint records to the public URL and prove 
 - **Placeholder scores** are returned only when `GRAPH_API_KEY` is missing, and they say so in `notes`. Set the key before recording or judging.
 - **No LLM in the loop.** Task planning is a keyword map and every decision is deterministic. An LLM explanation paragraph is a roadmap item and would never sit on the payment path.
 
+## Live deployment
+
+- Console and API: https://mandiserver-production.up.railway.app (one Railway service built from the root `Dockerfile`; the console is served from the same origin, the x402 gate is under `/s/*`).
+- Seller accreditation page: https://mandiserver-production.up.railway.app/seller?name=risk-pro&wallet=0x0E5B063e058BB5dD45f3EE7ea34f2C87F7B15B6c
+- The three ENS names resolve to that host: `agent-endpoint[x402]` on `risk-basic.mandi.eth`, `risk-pro.mandi.eth`, `risk-pro-2.mandi.eth`.
+- First paid call against the public URL, settled through Blocky402 with live Aave data in the response: https://hashscan.io/testnet/transaction/0.0.7162784-1789194411-135984699
+- First procurement executed by the deployed executor (policy anchored, decision and receipt on the topic): payment https://hashscan.io/testnet/transaction/0.0.7162784-1789194436-844603129
+
+Any redeploy resets in-memory state (active policies, ledgers, directory cache); activate the policy again after a push. Attestations persist on the mounted volume; everything judged lives on chain.
+
 ## Status
 
-Verified live on Sept 10, 2026, from a laptop against Hedera testnet and ENSv2 Sepolia:
+Verified live on Sept 10, 2026, from a laptop against Hedera testnet and ENSv2 Sepolia, and again on Sept 12 from the public deployment:
 
 | Artifact | Where to look |
 |---|---|
@@ -196,7 +206,6 @@ Live subgraph data confirmed through paid calls on Sept 10: `Assess risk of Aave
 
 Still pending:
 
-- A public deployment. The supplier endpoints in ENS still point at `http://localhost:3000`; re-run `register-service` for each label after setting `PUBLIC_URL`.
 - Selfie Check on the World ID Sandbox app, which needs the beta flag and a phone.
 
 ## Roadmap
