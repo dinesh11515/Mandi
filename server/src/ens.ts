@@ -9,13 +9,14 @@ import {
   concat,
   parseAbi,
   stringToBytes,
+  zeroAddress,
   type Address,
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import { labelhash, namehash, normalize } from "viem/ens";
-import { config, requireEnv, supplierByLabel } from "./config";
+import { SUPPLIERS, config, requireEnv, supplierByLabel } from "./config";
 import { formatHbar } from "./hbar";
 import { ServiceCardSchema, type ServiceCard } from "./types";
 
@@ -247,11 +248,32 @@ export async function setTextRecord(name: string, key: string, value: string): P
   return hash;
 }
 
-let directoryCache: { at: number; cards: ServiceCard[] } | undefined;
+export async function labelsOnChain(labels: string[]): Promise<string[]> {
+  const client = publicClient();
+  const address = subregistryAddress();
+  const found: string[] = [];
+  for (const label of labels) {
+    const resolver = await client.readContract({ address, abi: registryAbi, functionName: "getResolver", args: [label] });
+    if (resolver !== zeroAddress) found.push(label);
+  }
+  return found;
+}
+
+let directoryCache: { at: number; cards: ServiceCard[]; source: "events" | "registry-lookup" } | undefined;
+
+export function directorySource(): string | null {
+  return directoryCache?.source ?? null;
+}
 
 export async function directory(capability?: string): Promise<string[]> {
   if (!directoryCache || Date.now() - directoryCache.at > 60_000) {
-    const labels = await registeredLabels();
+    let labels = await registeredLabels();
+    let source: "events" | "registry-lookup" = "events";
+    if (labels.length === 0) {
+      labels = await labelsOnChain(SUPPLIERS.map((s) => s.label));
+      source = "registry-lookup";
+      if (labels.length > 0) console.warn(`directory: no LabelRegistered logs from ${config.ens.rpcUrl || "default rpc"}; listed ${labels.length} names verified via getResolver`);
+    }
     const cards: ServiceCard[] = [];
     for (const label of labels) {
       try {
@@ -260,7 +282,7 @@ export async function directory(capability?: string): Promise<string[]> {
         console.warn(`directory skip ${label}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    directoryCache = { at: Date.now(), cards };
+    directoryCache = { at: Date.now(), cards, source };
   }
   return directoryCache.cards
     .filter((card) => !capability || card.capability === capability)
