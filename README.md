@@ -120,7 +120,23 @@ Run the tests with `pnpm test` (37 cases: policy hashing and activation, executo
 | `UPSTREAM_TIMEOUT_MS` | `8000` | Client-side timeout for supplier calls |
 | `MANDI_FAIL` | unset | Demo switch, e.g. `risk-pro:timeout` or `risk-basic:error`, makes a supplier fail after authorization |
 
-Deploy with the root `Dockerfile` (Railway, Render, Fly) for a single URL, or deploy `web/` to Vercel with `VITE_API_URL` pointing at the server.
+Deploy with the root `Dockerfile` (Railway, Render, Fly) for a single URL, or deploy `web/` to Vercel with `VITE_API_URL` pointing at the server. The image was built and smoke-tested locally with Docker: it serves the console, the 402 gate, the directory and reliability, and contains no `.env`. Use a dedicated Sepolia RPC (Alchemy or Infura) in production; public endpoints were seen returning no receipts or logs for blocks that state queries confirm.
+
+Railway, from a logged-in CLI:
+
+```bash
+railway init                                   # new project
+railway variables --set "$(cat .env | tr '\n' ' ')"   # or paste .env into the dashboard's raw editor
+railway up --detach                            # builds the Dockerfile
+railway domain                                 # prints https://<app>.up.railway.app
+railway variables --set PUBLIC_URL=https://<app>.up.railway.app
+railway volume add --mount-path /data && railway variables --set ATTESTATION_FILE=/data/attestations.json
+railway up --detach                            # redeploy with the final variables
+cd server && for l in risk-basic risk-pro risk-pro-2; do PUBLIC_URL=https://<app>.up.railway.app pnpm exec tsx scripts/register-service.ts $l; done
+PUBLIC_URL=https://<app>.up.railway.app pnpm exec tsx scripts/pay-once.ts risk-basic aave
+```
+
+The last two lines rewrite the ENS endpoint records to the public URL and prove a paid call from outside.
 
 ## Sponsor tracks
 
@@ -129,7 +145,7 @@ Deploy with the root `Dockerfile` (Railway, Render, Fly) for a single URL, or de
 - Live x402-gated services on Hedera testnet, settled through the **Blocky402** facilitator (`api.testnet.blocky402.com`, scheme `exact`, asset HBAR `0.0.0`).
 - The buyer agent completes real paid requests end to end with `@x402/fetch` and `@x402/hedera`.
 - **Metering**: each supplier quotes a different price per route (`/assess` vs `/assess/deep`), computed from config at request time.
-- **Discovery**: a capability directory built from the ENSv2 subregistry's `LabelRegistered` events, resolved through the universal resolver.
+- **Discovery**: a capability directory built from the ENSv2 subregistry's `LabelRegistered` events, resolved through the universal resolver. If the RPC returns no logs (free public Sepolia RPCs prune receipts and cap log ranges), the directory verifies the configured labels directly against the subregistry's `getResolver` and lists only names that exist on chain; the response says which path produced it in `source`.
 - **Audit trail on HCS**: `POLICY_ACTIVATED`, `DECISION` (approved and rejected) and `RECEIPT` messages on one topic. The reliability index is computed only from those receipts.
 - Agent identity is the ENS name, not HCS-14. Said plainly here so nobody reads more into it.
 
