@@ -92,7 +92,25 @@ export const initializeResolverAbi = parseAbi([
 export const initializeRegistryAbi = parseAbi(["function initialize(address rootAccount, uint256 roleBitmap)"]);
 
 export function publicClient() {
-  return createPublicClient({ chain: sepolia, transport: http(config.ens.rpcUrl || undefined) });
+  return createPublicClient({
+    chain: sepolia,
+    transport: http(config.ens.rpcUrl || undefined, { retryCount: 5, retryDelay: 400, timeout: 20_000 }),
+  });
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function withRetry<T>(work: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await work();
+    } catch (err) {
+      lastError = err;
+      await sleep(300 * (i + 1));
+    }
+  }
+  throw lastError;
 }
 
 export function deployerAccount() {
@@ -181,7 +199,8 @@ export function serviceRecords(label: string): Record<string, string> {
 export async function readRecords(name: string, keys: string[]): Promise<Record<string, string>> {
   const client = publicClient();
   const normalized = normalize(name);
-  const values = await Promise.all(keys.map((key) => client.getEnsText({ name: normalized, key })));
+  const values: (string | null)[] = [];
+  for (const key of keys) values.push(await withRetry(() => client.getEnsText({ name: normalized, key })));
   const out: Record<string, string> = {};
   keys.forEach((key, i) => {
     out[key] = values[i] ?? "";
@@ -227,7 +246,8 @@ export async function setTextRecord(name: string, key: string, value: string): P
 
 const MAX_CHUNK = 1000n;
 const MIN_CHUNK = 10n;
-const REQUESTS_PER_REFRESH = 150;
+const REQUESTS_PER_REFRESH = 30;
+const REQUEST_SPACING_MS = 150;
 const scan: { address?: Address; nextBlock?: bigint; chunk: bigint; labels: Set<string> } = { chunk: MAX_CHUNK, labels: new Set() };
 
 function rangeLimitFrom(message: string): bigint | null {
@@ -250,6 +270,7 @@ export async function registeredLabels(): Promise<string[]> {
   while (from <= head && requests < REQUESTS_PER_REFRESH) {
     const to = from + scan.chunk - 1n > head ? head : from + scan.chunk - 1n;
     requests += 1;
+    if (requests > 1) await sleep(REQUEST_SPACING_MS);
     try {
       const logs = await client.getLogs({ address, event: registryAbi[8], fromBlock: from, toBlock: to });
       for (const log of logs) if (log.args.label) scan.labels.add(log.args.label);
