@@ -8,7 +8,7 @@ import { config } from "./config";
 import { run } from "./buyer/agent";
 import { executeIntent, lookups } from "./buyer/executor";
 import { activatePolicy, describeActivation, getActivePolicy } from "./buyer/policy";
-import { directory, directorySource, labelOf, resolveService } from "./ens";
+import { directory, directorySource, labelOf, resolveService, scanProgress } from "./ens";
 import { registerReceiptHooks } from "./market/receipts";
 import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
@@ -32,7 +32,7 @@ app.route("/s", market);
 app.get("/directory", async (c) => {
   try {
     const names = await directory(c.req.query("capability"));
-    return c.json({ capability: c.req.query("capability") ?? null, names, source: directorySource() });
+    return c.json({ capability: c.req.query("capability") ?? null, names, source: directorySource(), scan: scanProgress() });
   } catch (err) {
     return c.json({ error: message(err) }, 503);
   }

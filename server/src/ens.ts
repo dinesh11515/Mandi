@@ -213,29 +213,6 @@ export function resolverAddress(): Address {
   return predictProxy(deployerAccount().address, resolverSalt(deployerAccount().address));
 }
 
-const LOG_CHUNK = 1000n;
-const scan: { address?: Address; nextBlock?: bigint; labels: Set<string> } = { labels: new Set() };
-
-export async function registeredLabels(): Promise<string[]> {
-  const client = publicClient();
-  const address = subregistryAddress();
-  const head = await client.getBlockNumber();
-  if (scan.address !== address) {
-    scan.address = address;
-    scan.labels = new Set();
-    scan.nextBlock = config.ens.fromBlock ? BigInt(config.ens.fromBlock) : head - 100_000n;
-  }
-  let from = scan.nextBlock!;
-  while (from <= head) {
-    const to = from + LOG_CHUNK - 1n > head ? head : from + LOG_CHUNK - 1n;
-    const logs = await client.getLogs({ address, event: registryAbi[8], fromBlock: from, toBlock: to });
-    for (const log of logs) if (log.args.label) scan.labels.add(log.args.label);
-    from = to + 1n;
-  }
-  scan.nextBlock = head + 1n;
-  return [...scan.labels];
-}
-
 export async function setTextRecord(name: string, key: string, value: string): Promise<string> {
   const wallet = walletClient();
   const hash = await wallet.writeContract({
@@ -246,6 +223,53 @@ export async function setTextRecord(name: string, key: string, value: string): P
   });
   await publicClient().waitForTransactionReceipt({ hash });
   return hash;
+}
+
+const MAX_CHUNK = 1000n;
+const MIN_CHUNK = 10n;
+const REQUESTS_PER_REFRESH = 150;
+const scan: { address?: Address; nextBlock?: bigint; chunk: bigint; labels: Set<string> } = { chunk: MAX_CHUNK, labels: new Set() };
+
+function rangeLimitFrom(message: string): bigint | null {
+  const match = /(\d+)\s*block/i.exec(message);
+  return match ? BigInt(match[1]!) : null;
+}
+
+export async function registeredLabels(): Promise<string[]> {
+  const client = publicClient();
+  const address = subregistryAddress();
+  const head = await client.getBlockNumber();
+  if (scan.address !== address) {
+    scan.address = address;
+    scan.labels = new Set();
+    scan.chunk = MAX_CHUNK;
+    scan.nextBlock = config.ens.fromBlock ? BigInt(config.ens.fromBlock) : head - 100_000n;
+  }
+  let from = scan.nextBlock!;
+  let requests = 0;
+  while (from <= head && requests < REQUESTS_PER_REFRESH) {
+    const to = from + scan.chunk - 1n > head ? head : from + scan.chunk - 1n;
+    requests += 1;
+    try {
+      const logs = await client.getLogs({ address, event: registryAbi[8], fromBlock: from, toBlock: to });
+      for (const log of logs) if (log.args.label) scan.labels.add(log.args.label);
+      from = to + 1n;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (scan.chunk > MIN_CHUNK && /range|limit|blocks/i.test(message)) {
+        const limit = rangeLimitFrom(message);
+        scan.chunk = limit && limit >= MIN_CHUNK && limit < scan.chunk ? limit : scan.chunk / 2n > MIN_CHUNK ? scan.chunk / 2n : MIN_CHUNK;
+        continue;
+      }
+      throw err;
+    }
+  }
+  scan.nextBlock = from;
+  return [...scan.labels];
+}
+
+export function scanProgress() {
+  return { nextBlock: scan.nextBlock?.toString() ?? null, chunk: scan.chunk.toString(), labelsFromEvents: scan.labels.size };
 }
 
 export async function labelsOnChain(labels: string[]): Promise<string[]> {
@@ -259,7 +283,7 @@ export async function labelsOnChain(labels: string[]): Promise<string[]> {
   return found;
 }
 
-let directoryCache: { at: number; cards: ServiceCard[]; source: "events" | "registry-lookup" } | undefined;
+let directoryCache: { at: number; cards: ServiceCard[]; source: string } | undefined;
 
 export function directorySource(): string | null {
   return directoryCache?.source ?? null;
@@ -267,13 +291,15 @@ export function directorySource(): string | null {
 
 export async function directory(capability?: string): Promise<string[]> {
   if (!directoryCache || Date.now() - directoryCache.at > 60_000) {
-    let labels = await registeredLabels();
-    let source: "events" | "registry-lookup" = "events";
-    if (labels.length === 0) {
-      labels = await labelsOnChain(SUPPLIERS.map((s) => s.label));
-      source = "registry-lookup";
-      if (labels.length > 0) console.warn(`directory: no LabelRegistered logs from ${config.ens.rpcUrl || "default rpc"}; listed ${labels.length} names verified via getResolver`);
-    }
+    const [fromEvents, verified] = await Promise.all([
+      registeredLabels().catch((err) => {
+        console.warn(`directory: event scan failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
+        return [] as string[];
+      }),
+      labelsOnChain(SUPPLIERS.map((s) => s.label)),
+    ]);
+    const labels = [...new Set([...fromEvents, ...verified])];
+    const source = fromEvents.length > 0 ? (verified.some((v) => !fromEvents.includes(v)) ? "events+registry-lookup" : "events") : "registry-lookup";
     const cards: ServiceCard[] = [];
     for (const label of labels) {
       try {
