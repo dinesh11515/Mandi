@@ -1,4 +1,5 @@
 FROM node:22-slim
+ENV CI=true
 RUN corepack enable
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./

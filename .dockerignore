@@ -1,0 +1,10 @@
+.git
+node_modules
+**/node_modules
+web/dist
+server/data
+.env
+**/.env
+mandi.md
+CLAUDE.md
+docs
