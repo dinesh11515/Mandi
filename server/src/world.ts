@@ -6,7 +6,7 @@ import { recoverMessageAddress, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { namehash } from "viem/ens";
 import { canonicalize, sha256 } from "./buyer/policy";
-import { config, requireEnv, supplierByLabel } from "./config";
+import { allSuppliers, config, requireEnv, supplierByLabel } from "./config";
 import { deployerAccount, RECORD_KEYS, serviceName, setTextRecord } from "./ens";
 
 export const WORLD_ACTION = process.env.WORLD_ACTION || "mandi-supplier-accreditation";
@@ -34,8 +34,8 @@ export function signedWorldRequest(): { rp_context: RpContext; action: string; w
   return { rp_context: rpContext(), action: WORLD_ACTION, wallet: sellerWallet() };
 }
 
-export function worldConfig(): { action: string; wallet: Address } {
-  return { action: WORLD_ACTION, wallet: sellerWallet() };
+export function worldConfig(): { action: string; wallet: Address; labels: string[] } {
+  return { action: WORLD_ACTION, wallet: sellerWallet(), labels: allSuppliers().map((s) => s.label) };
 }
 
 export type AttestationPayload = {

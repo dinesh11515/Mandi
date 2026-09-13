@@ -1,15 +1,17 @@
 import { IDKitRequestWidget, selfieCheckLegacy, type IDKitResult, type RpContext } from "@worldcoin/idkit";
 import { useEffect, useState } from "react";
-import { API, ensExplorer, SELLER_WALLET } from "./api";
+import { API, ensExplorer, sepoliaTx, SELLER_WALLET } from "./api";
 import { IconAlert, IconArrow, IconCheck, IconExternal, IconShieldCheck, Spinner } from "./icons";
 import { Topbar } from "./Shell";
 
 type Attestation = { name: string; wallet: string; hashedNullifier: string; expiry: number; issuer: string; sig: string };
 
-type WorldConfig = { action: string; wallet: string };
+type WorldConfig = { action: string; wallet: string; labels?: string[] };
 type SignedWorldRequest = WorldConfig & { rp_context: RpContext };
+type RegisterResult = { name: string; owner: string; minted: boolean; mintTx: string | null; recordsTx: string; records: Record<string, string> };
 
 const FALLBACK_WALLET = SELLER_WALLET;
+const FALLBACK_LABELS = ["risk-basic", "risk-pro", "risk-pro-2"];
 
 const IDKIT_ERRORS: Record<string, string> = {
   user_rejected: "Selfie Check was cancelled in World App. Start again when you are ready.",
@@ -26,70 +28,120 @@ const IDKIT_ERRORS: Record<string, string> = {
   timeout: "World App did not return a proof in time. Start Selfie Check again.",
 };
 
-function syncWalletUrl(name: string, wallet: string) {
+function syncUrl(name: string, wallet: string) {
   const next = new URL(location.href);
-  next.searchParams.set("name", name);
-  next.searchParams.set("wallet", wallet);
+  if (name) next.searchParams.set("name", name);
+  if (wallet) next.searchParams.set("wallet", wallet);
   history.replaceState(null, "", `${next.pathname}${next.search}`);
 }
 
 export function Seller() {
   const params = new URLSearchParams(location.search);
-  const label = params.get("name") ?? "risk-pro";
   const appId = (import.meta.env.VITE_WORLD_APP_ID as string | undefined) ?? "";
+  const [label, setLabel] = useState(params.get("name") ?? "");
+  const [labels, setLabels] = useState<string[]>(FALLBACK_LABELS);
   const [wallet, setWallet] = useState(params.get("wallet") || FALLBACK_WALLET);
+  const [listed, setListed] = useState(false);
+  const [listing, setListing] = useState<RegisterResult | null>(null);
   const [rp, setRp] = useState<RpContext | null>(null);
   const [action, setAction] = useState("mandi-supplier-accreditation");
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"register" | "enroll" | "selfie" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ attestation: Attestation; ensTx: string | null; ensError: string | null } | null>(null);
 
   useEffect(() => {
-    if (wallet) {
-      syncWalletUrl(label, wallet);
-      return;
-    }
     let alive = true;
     fetch(`${API}/world/config`)
       .then(async (res) => {
         const body = (await res.json()) as WorldConfig & { error?: string };
-        const next = body.wallet || FALLBACK_WALLET;
-        if (!alive || !next) return;
+        if (!alive) return;
+        if (body.labels?.length) setLabels(body.labels);
         if (body.action) setAction(body.action);
-        setWallet(next);
-        syncWalletUrl(label, next);
+        const next = wallet || body.wallet || FALLBACK_WALLET;
+        if (next) {
+          setWallet(next);
+          syncUrl(label, next);
+        }
       })
       .catch(() => {
         if (!alive || !FALLBACK_WALLET) return;
         setWallet(FALLBACK_WALLET);
-        syncWalletUrl(label, FALLBACK_WALLET);
+        syncUrl(label, FALLBACK_WALLET);
       });
     return () => {
       alive = false;
     };
-  }, [label, wallet]);
+  }, []);
 
-  const start = async () => {
+  useEffect(() => {
+    let alive = true;
+    setListed(false);
+    setListing(null);
+    setResult(null);
+    setRp(null);
+    setOpen(false);
+    syncUrl(label, wallet);
+    if (!label) return;
+    fetch(`${API}/resolve/${label}.mandi.eth`)
+      .then((res) => alive && setListed(res.ok))
+      .catch(() => alive && setListed(false));
+    return () => {
+      alive = false;
+    };
+  }, [label]);
+
+  const mint = async (): Promise<RegisterResult> => {
+    const res = await fetch(`${API}/sellers/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label, depth: "pro", priceHbar: 0.03 }),
+    });
+    const body = (await res.json()) as RegisterResult & { error?: string };
+    if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+    setListing(body);
+    setListed(true);
+    setLabels((prev) => (prev.includes(label) ? prev : [...prev, label]));
+    return body;
+  };
+
+  const selfie = async () => {
+    const res = await fetch(`${API}/world/rp-signature`, { method: "POST" });
+    const body = (await res.json()) as SignedWorldRequest & RpContext & { error?: string };
+    if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+    const ctx = body.rp_context ?? (body.rp_id ? { rp_id: body.rp_id, nonce: body.nonce, created_at: body.created_at, expires_at: body.expires_at, signature: body.signature } : null);
+    if (!ctx) throw new Error("rp-signature response missing rp_context");
+    const nextWallet = wallet || body.wallet || FALLBACK_WALLET;
+    if (!nextWallet) throw new Error("no seller wallet configured");
+    setWallet(nextWallet);
+    syncUrl(label, nextWallet);
+    if (body.action) setAction(body.action);
+    setRp(ctx);
+    setOpen(true);
+  };
+
+  const register = async () => {
     setError(null);
-    setBusy(true);
+    setBusy("register");
     try {
-      const res = await fetch(`${API}/world/rp-signature`, { method: "POST" });
-      const body = (await res.json()) as SignedWorldRequest & RpContext & { error?: string };
-      if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-      const ctx = body.rp_context ?? (body.rp_id ? { rp_id: body.rp_id, nonce: body.nonce, created_at: body.created_at, expires_at: body.expires_at, signature: body.signature } : null);
-      if (!ctx) throw new Error("rp-signature response missing rp_context");
-      const nextWallet = wallet || body.wallet || FALLBACK_WALLET;
-      if (!nextWallet) throw new Error("no seller wallet configured");
-      setWallet(nextWallet);
-      syncWalletUrl(label, nextWallet);
-      if (body.action) setAction(body.action);
-      setRp(ctx);
-      setOpen(true);
+      await mint();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  };
+
+  const enroll = async () => {
+    setError(null);
+    setBusy("enroll");
+    try {
+      if (!listed) await mint();
+      await selfie();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -108,7 +160,10 @@ export function Seller() {
     setResult(body);
   };
 
-  const step = result ? 3 : open || rp ? 2 : 1;
+  const onChain = listed || !!listing;
+  const step = result ? 3 : open || rp ? 2 : onChain ? 2 : 1;
+  const name = label ? `${label}.mandi.eth` : "your-name.mandi.eth";
+  const ready = Boolean(label && appId && wallet);
 
   return (
     <>
@@ -116,62 +171,107 @@ export function Seller() {
       <main className="seller-wrap">
         <div className="hero">
           <div>
-            <h1>Seller accreditation</h1>
+            <h1>Become a seller</h1>
             <p>
-              Selfie Check binds a verified human to a supplier name. Buyers whose policy says <span className="mono">requireVerifiedFor</span> will only pay accredited
-              suppliers. The attestation is signed by Mandi's verifier; the ENS flag is a display hint only.
+              Pick a new name, mint it on ENS, then Selfie Check. The buyer agent will discover you from <span className="mono">mandi.eth</span> and only pay you if
+              policy allows an attested supplier.
             </p>
           </div>
         </div>
         <section className="card">
           <div className="card-h">
             <h2>
-              <IconShieldCheck size={16} /> {label}.mandi.eth
+              <IconShieldCheck size={16} /> {name}
             </h2>
-            <a className="navlink" href={ensExplorer(`${label}.mandi.eth`)} target="_blank" rel="noreferrer">
-              ENS explorer <IconExternal size={14} />
-            </a>
+            {label && (
+              <a className="navlink" href={ensExplorer(name)} target="_blank" rel="noreferrer">
+                ENS explorer <IconExternal size={14} />
+              </a>
+            )}
           </div>
           <div className="card-b stack-sm">
+            <label className="field">
+              supplier name
+              <input
+                className="text"
+                value={label}
+                maxLength={16}
+                placeholder="acme-risk"
+                spellCheck={false}
+                disabled={!!busy || !!result}
+                onChange={(e) => setLabel(e.target.value.trim().toLowerCase())}
+              />
+            </label>
+            <div className="row">
+              {labels.map((item) => (
+                <button key={item} type="button" className={`chip ${item === label ? "on" : ""}`} onClick={() => setLabel(item)} disabled={!!busy || !!result}>
+                  {item}
+                </button>
+              ))}
+            </div>
             <dl className="kv">
               <dt>seller wallet</dt>
               <dd className="mono truncate">{wallet || <span className="pill">resolving seller wallet…</span>}</dd>
-              <dt>signal</dt>
-              <dd className="muted">the wallet address, so the proof cannot be replayed for another seller</dd>
-              <dt>environment</dt>
-              <dd>
-                <span className="pill info">World App · production</span>
-              </dd>
+              <dt>listing</dt>
+              <dd>{onChain ? <span className="pill ok">on ENS</span> : <span className="pill">not minted yet</span>}</dd>
+              <dt>price</dt>
+              <dd>0.03 HBAR / call · same Graph risk scorer as risk-pro</dd>
             </dl>
             <div className="steps">
-              <div className={`stepcard ${step > 1 ? "done" : "active"}`}>
-                <span className="n">{step > 1 ? <IconCheck size={13} /> : "1"}</span>
+              <div className={`stepcard ${onChain ? "done" : "active"}`}>
+                <span className="n">{onChain ? <IconCheck size={13} /> : "1"}</span>
                 <div>
-                  <b>Start Selfie Check</b>
-                  <div className="muted">Mandi signs the request with its relying-party key.</div>
+                  <b>Register on ENS</b>
+                  <div className="muted">Mints {name} live on Sepolia and publishes the x402 endpoint.</div>
                 </div>
               </div>
               <div className={`stepcard ${step > 2 ? "done" : step === 2 ? "active" : ""}`}>
                 <span className="n">{step > 2 ? <IconCheck size={13} /> : "2"}</span>
                 <div>
-                  <b>Complete in World App</b>
-                  <div className="muted">Scan the QR from a laptop, or open this page inside World App — IDKit uses the native handoff there. No sandbox build.</div>
+                  <b>Selfie Check in World App</b>
+                  <div className="muted">Opens immediately after the mint. Scan the QR, or stay in World App.</div>
                 </div>
               </div>
               <div className={`stepcard ${step === 3 ? "done" : ""}`}>
                 <span className="n">{step === 3 ? <IconCheck size={13} /> : "3"}</span>
                 <div>
-                  <b>Attestation issued</b>
-                  <div className="muted">Valid for 90 days, one accreditation per human, enforced by the executor.</div>
+                  <b>Live on the marketplace</b>
+                  <div className="muted">Attested for 90 days. Refresh the console — the new name is in the directory.</div>
                 </div>
               </div>
             </div>
             <div className="row">
-              <button className="btn primary" onClick={start} disabled={!appId || !wallet || open || busy || !!result}>
-                {busy ? <Spinner size={14} /> : <IconArrow size={15} />} Start Selfie Check
+              <button className="btn primary" onClick={enroll} disabled={!ready || open || !!busy || !!result}>
+                {busy === "enroll" ? <Spinner size={14} /> : <IconArrow size={15} />} {onChain ? "Start Selfie Check" : "Register & Selfie Check"}
               </button>
+              {onChain && (
+                <button className="btn ghost" onClick={register} disabled={!ready || !!busy || !!result}>
+                  {busy === "register" ? <Spinner size={14} /> : <IconArrow size={15} />} Refresh ENS records
+                </button>
+              )}
               {!appId && <span className="pill bad">VITE_WORLD_APP_ID is not set</span>}
             </div>
+            {busy === "enroll" && !listing && <div className="muted">minting on Sepolia, then opening World ID…</div>}
+            {listing && (
+              <div className="notice ok">
+                <IconCheck size={16} />
+                <span>
+                  {listing.minted ? "minted" : "already listed"} {listing.name}
+                  {" · "}
+                  <a href={sepoliaTx(listing.recordsTx)} target="_blank" rel="noreferrer">
+                    records tx <IconExternal size={14} />
+                  </a>
+                  {listing.mintTx && (
+                    <>
+                      {" · "}
+                      <a href={sepoliaTx(listing.mintTx)} target="_blank" rel="noreferrer">
+                        mint tx <IconExternal size={14} />
+                      </a>
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
             {error && (
               <div className="notice bad">
                 <IconAlert size={16} /> {error}
@@ -183,7 +283,7 @@ export function Seller() {
                 onOpenChange={setOpen}
                 app_id={appId as `app_${string}`}
                 action={action}
-                action_description={`Accredit ${label}.mandi.eth on Mandi`}
+                action_description={`Accredit ${name} on Mandi`}
                 rp_context={rp}
                 allow_legacy_proofs={true}
                 environment="production"

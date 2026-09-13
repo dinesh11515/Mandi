@@ -16,7 +16,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import { labelhash, namehash, normalize } from "viem/ens";
-import { SUPPLIERS, config, requireEnv, supplierByLabel } from "./config";
+import { allSuppliers, assertSellerLabel, config, requireEnv, supplierByLabel, upsertSupplier, type Depth } from "./config";
 import { formatHbar } from "./hbar";
 import { ServiceCardSchema, type ServiceCard } from "./types";
 
@@ -196,6 +196,67 @@ export function serviceRecords(label: string): Record<string, string> {
   };
 }
 
+const ONE_YEAR = 365 * 24 * 60 * 60;
+
+export type RegisterResult = {
+  name: string;
+  owner: Address;
+  minted: boolean;
+  mintTx: Hex | null;
+  recordsTx: Hex;
+  records: Record<string, string>;
+};
+
+export type RegisterOpts = { depth?: Depth; priceHbar?: number };
+
+export async function registerService(label: string, opts: RegisterOpts = {}): Promise<RegisterResult> {
+  const normalized = assertSellerLabel(label);
+  if (!supplierByLabel(normalized)) {
+    const priceHbar = opts.priceHbar ?? 0.03;
+    upsertSupplier({
+      label: normalized,
+      capability: "financial-risk",
+      depth: opts.depth ?? "pro",
+      priceHbar,
+      deepPriceHbar: Math.round(priceHbar * 2 * 100) / 100,
+      payTo: "",
+      context: "Protocol risk assessment from TVL, utilization and liquidity. Newly registered operator.",
+    });
+  }
+  const reader = publicClient();
+  const wallet = walletClient();
+  const account = deployerAccount();
+  const owner = (config.ens.sellerAddress || account.address) as Address;
+  const subregistry = subregistryAddress();
+  const resolver = resolverAddress();
+  const name = serviceName(normalized);
+
+  let minted = false;
+  let mintTx: Hex | null = null;
+  const existing = await reader.readContract({ address: subregistry, abi: registryAbi, functionName: "getResolver", args: [normalized] });
+  if (existing === zeroAddress) {
+    const expiry = BigInt(Math.floor(Date.now() / 1000) + ONE_YEAR);
+    mintTx = await wallet.writeContract({
+      address: subregistry,
+      abi: registryAbi,
+      functionName: "register",
+      args: [normalized, owner, zeroAddress, resolver, ROLE_SET_RESOLVER, expiry],
+    });
+    await reader.waitForTransactionReceipt({ hash: mintTx });
+    minted = true;
+  }
+
+  const records = serviceRecords(normalized);
+  const node = nodeOf(name);
+  const calls = Object.entries(records).map(([key, value]) =>
+    encodeFunctionData({ abi: resolverAbi, functionName: "setText", args: [node, key, value] }),
+  );
+  const recordsTx = await wallet.writeContract({ address: resolver, abi: resolverAbi, functionName: "multicall", args: [calls] });
+  await reader.waitForTransactionReceipt({ hash: recordsTx });
+  rememberLabel(normalized);
+  return { name, owner, minted, mintTx, recordsTx, records: await readRecords(name, Object.values(RECORD_KEYS)) };
+}
+
 export async function readRecords(name: string, keys: string[]): Promise<Record<string, string>> {
   const client = publicClient();
   const normalized = normalize(name);
@@ -304,6 +365,11 @@ export async function labelsOnChain(labels: string[]): Promise<string[]> {
   return found;
 }
 
+function rememberLabel(label: string) {
+  scan.labels.add(label);
+  directoryCache = undefined;
+}
+
 let directoryCache: { at: number; cards: ServiceCard[]; source: string } | undefined;
 
 export function directorySource(): string | null {
@@ -317,7 +383,7 @@ export async function directory(capability?: string): Promise<string[]> {
         console.warn(`directory: event scan failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
         return [] as string[];
       }),
-      labelsOnChain(SUPPLIERS.map((s) => s.label)),
+      labelsOnChain(allSuppliers().map((s) => s.label)),
     ]);
     const labels = [...new Set([...fromEvents, ...verified])];
     const source = fromEvents.length > 0 ? (verified.some((v) => !fromEvents.includes(v)) ? "events+registry-lookup" : "events") : "registry-lookup";

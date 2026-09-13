@@ -97,5 +97,6 @@ export function stream(task: string, policyHash: string, onEvent: (ev: AgentEven
 }
 
 export const ensExplorer = (name: string) => `https://explorer.ens.dev/name/${name}`;
+export const sepoliaTx = (hash: string) => `https://sepolia.etherscan.io/tx/${hash}`;
 
 export type { Decision, Policy, ServiceCard };

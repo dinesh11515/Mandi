@@ -8,7 +8,7 @@ import { config } from "./config";
 import { run } from "./buyer/agent";
 import { executeIntent, lookups } from "./buyer/executor";
 import { activatePolicy, describeActivation, getActivePolicy } from "./buyer/policy";
-import { directory, directorySource, labelOf, resolveService, scanProgress } from "./ens";
+import { directory, directorySource, labelOf, registerService, resolveService, scanProgress } from "./ens";
 import { registerReceiptHooks } from "./market/receipts";
 import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
@@ -91,6 +91,16 @@ app.get("/reliability/:name", async (c) => {
 app.get("/world/config", (c) => {
   try {
     return c.json(worldConfig());
+  } catch (err) {
+    return c.json({ error: message(err) }, 400);
+  }
+});
+
+app.post("/sellers/register", async (c) => {
+  try {
+    const body = (await c.req.json()) as { label?: string; depth?: "basic" | "pro"; priceHbar?: number };
+    if (!body.label) throw new Error("label required");
+    return c.json(await registerService(body.label, { depth: body.depth, priceHbar: body.priceHbar }));
   } catch (err) {
     return c.json({ error: message(err) }, 400);
   }

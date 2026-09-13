@@ -45,7 +45,7 @@ export function Topbar({ topicUrl, right }: { topicUrl?: string | null; right?: 
           mandi.eth <IconExternal size={14} />
         </a>
         <a className="navlink" href={sellerHref()}>
-          <IconShield size={14} /> Seller accreditation
+          <IconShield size={14} /> Register seller
         </a>
         <a className="navlink" href="https://github.com/dinesh11515/Mandi" target="_blank" rel="noreferrer">
           GitHub <IconExternal size={14} />

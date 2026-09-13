@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
 
@@ -61,8 +62,45 @@ export const SUPPLIERS: Supplier[] = [
   },
 ];
 
+const extrasFile = () =>
+  process.env.SELLERS_FILE || (process.env.ATTESTATION_FILE ? path.join(path.dirname(process.env.ATTESTATION_FILE), "sellers.json") : path.resolve(import.meta.dirname, "../data/sellers.json"));
+
+function loadExtras(): Supplier[] {
+  try {
+    return JSON.parse(fs.readFileSync(extrasFile(), "utf8")) as Supplier[];
+  } catch {
+    return [];
+  }
+}
+
+export function assertSellerLabel(label: string): string {
+  const normalized = label.trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,14}[a-z0-9])?$/.test(normalized)) {
+    throw new Error("label must be 1–16 chars, lowercase letters, digits, and hyphens");
+  }
+  return normalized;
+}
+
+export function allSuppliers(): Supplier[] {
+  const extras = loadExtras();
+  const seen = new Set(SUPPLIERS.map((s) => s.label));
+  return [...SUPPLIERS, ...extras.filter((s) => !seen.has(s.label))];
+}
+
 export function supplierByLabel(label: string): Supplier | undefined {
-  return SUPPLIERS.find((s) => s.label === label);
+  return allSuppliers().find((s) => s.label === label);
+}
+
+export function upsertSupplier(row: Supplier): Supplier {
+  const label = assertSellerLabel(row.label);
+  if (SUPPLIERS.some((s) => s.label === label)) return SUPPLIERS.find((s) => s.label === label)!;
+  const next = { ...row, label, payTo: row.payTo || sellerAccount() };
+  if (!next.payTo) throw new Error("missing env SELLER_ACCOUNT_ID");
+  const extras = loadExtras().filter((s) => s.label !== label);
+  extras.push(next);
+  fs.mkdirSync(path.dirname(extrasFile()), { recursive: true });
+  fs.writeFileSync(extrasFile(), JSON.stringify(extras, null, 2));
+  return next;
 }
 
 function parseFailModes(spec: string): Record<string, string> {

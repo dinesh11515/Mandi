@@ -134,7 +134,7 @@ function Suppliers({ rows, loading, error, onRefresh }: { rows: SupplierRow[]; l
                       <Accreditation row={r} />
                       {!r.attestation?.valid && (
                         <a className="navlink" href={sellerHref(r.name.split(".")[0])}>
-                          accredit
+                          register
                         </a>
                       )}
                     </div>
