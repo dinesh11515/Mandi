@@ -109,3 +109,16 @@ export const IconCoins = (p: Props) => (
     <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
   </svg>
 );
+
+export const IconChevron = (p: Props) => (
+  <svg {...base(p)}>
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+);
+
+export const IconPower = (p: Props) => (
+  <svg {...base(p)}>
+    <path d="M12 4v8" />
+    <path d="M7.5 6.5a7 7 0 109 0" />
+  </svg>
+);

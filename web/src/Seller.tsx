@@ -20,7 +20,7 @@ import {
   type VerifyResult,
   type WorldConfig,
 } from "./sellerApi";
-import { shortAddress, useWallet } from "./wallet";
+import { chainLabel, shortAddress, useWallet, WALLET_GUIDE } from "./wallet";
 
 const DEFAULT_PRICE = "0.03";
 const DEFAULT_CAPABILITY = "financial-risk";
@@ -153,19 +153,27 @@ export function Seller() {
   const parent = config?.parent ?? "";
   const name = label && parent ? `${label}.${parent}` : "";
   const priceHbar = Number(price);
-  const problem = !SELLER_LABEL_PATTERN.test(label)
-    ? "name is 1–16 characters: lowercase letters, digits and inner hyphens, no leading or trailing hyphen"
-    : !Number.isFinite(priceHbar) || priceHbar <= 0
-      ? "price per call must be a positive number of HBAR"
-      : !ACCOUNT_PATTERN.test(payTo.trim())
-        ? "payTo must be a Hedera account id such as 0.0.1234"
-        : !capability.trim()
-          ? "capability is required"
-          : !context.trim()
-            ? "description is required"
-            : !parent
-              ? "waiting for the registry parent name"
-              : null;
+  const faults = {
+    label: SELLER_LABEL_PATTERN.test(label) ? null : "1–16 characters: lowercase letters, digits and inner hyphens, no hyphen at either end",
+    price: Number.isFinite(priceHbar) && priceHbar > 0 ? null : "a positive number of HBAR, such as 0.03",
+    payTo: ACCOUNT_PATTERN.test(payTo.trim()) ? null : "a Hedera account id such as 0.0.1234",
+    capability: capability.trim() ? null : "capability is required",
+    context: context.trim() ? null : "description is required",
+  };
+  const shown = {
+    label: label ? faults.label : null,
+    price: price ? faults.price : null,
+    payTo: payTo ? faults.payTo : null,
+    capability: capability ? faults.capability : null,
+    context: context ? faults.context : null,
+  };
+  const problem = !label
+    ? "pick a name to register"
+    : (faults.label ?? faults.price ?? faults.payTo ?? faults.capability ?? faults.context)
+      ? "fix the highlighted fields before signing"
+      : !parent
+        ? "waiting for the registry parent name"
+        : null;
 
   const register = async () => {
     const owner = ownerNow();
@@ -251,14 +259,22 @@ export function Seller() {
 
   return (
     <>
-      <Topbar wallet={wallet} />
+      <Topbar
+        wallet={wallet}
+        narrow
+        right={
+          <a className="navlink" href="/">
+            Buyer console
+          </a>
+        }
+      />
       <main className="seller-wrap">
         <div className="hero">
           <div>
             <h1>List your service on Mandi</h1>
             <p>
-              Connect the wallet that will own the name, register it under <span className="mono">{parent || "the Mandi registry"}</span>, then prove a human is behind
-              it with Selfie Check. Buyer agents discover you from ENS and pay per call over x402.
+              Connect the wallet that will own the name, register it under <span className="mono">{parent || "the Mandi registry"}</span>, then prove a human is behind it
+              with Selfie Check. Buyer agents discover you from ENS and pay per call over x402.
             </p>
           </div>
         </div>
@@ -266,14 +282,22 @@ export function Seller() {
         <section className="card">
           <div className="card-h">
             <h2>
-              <IconWallet size={16} /> Step 0 · Connect your wallet
+              <span className="stepno">0</span> Connect your wallet
             </h2>
-            {connected ? <span className="pill ok">connected</span> : <span className="pill warn">not connected</span>}
+            {connected ? (
+              <span className="pill ok">connected</span>
+            ) : wallet.status === "connecting" ? (
+              <span className="pill accent">
+                <Spinner size={12} /> connecting
+              </span>
+            ) : (
+              <span className="pill warn">not connected</span>
+            )}
           </div>
           <div className="card-b stack-sm">
             <p className="muted seller-note">
-              This wallet becomes the owner of the ENS name on Sepolia and the signal for Selfie Check. Everything below stays disabled until it is connected, and the
-              server only accepts a registration signed by it.
+              This wallet owns the ENS name on Sepolia and is the signal for Selfie Check. It signs, it never pays: the server only accepts a registration signed by it, and
+              everything below stays disabled until it is connected.
             </p>
             {connected ? (
               <dl className="kv">
@@ -281,19 +305,25 @@ export function Seller() {
                 <dd className="mono truncate" title={address ?? ""}>
                   {address}
                 </dd>
+                <dt>network</dt>
+                <dd>
+                  {chainLabel(wallet.chainId) ?? "unknown"} <span className="dim">· names are minted on Sepolia</span>
+                </dd>
               </dl>
+            ) : wallet.status === "absent" ? (
+              <div className="row">
+                <a className="btn ghost" href={WALLET_GUIDE} target="_blank" rel="noreferrer">
+                  <IconWallet size={15} /> Install a wallet <IconExternal size={13} />
+                </a>
+                <span className="fieldnote">No browser wallet was detected. Install one, then reload this page.</span>
+              </div>
             ) : (
               <div className="row">
-                <button type="button" className="btn primary" onClick={() => void wallet.connect().catch(() => undefined)} disabled={wallet.status === "connecting" || wallet.status === "absent"}>
+                <button type="button" className="btn primary" onClick={() => void wallet.connect().catch(() => undefined)} disabled={wallet.status === "connecting"} aria-busy={wallet.status === "connecting"}>
                   {wallet.status === "connecting" ? <Spinner size={14} /> : <IconWallet size={15} />}
-                  {wallet.status === "absent" ? "no browser wallet found" : "Connect wallet"}
+                  {wallet.status === "connecting" ? "Connecting…" : "Connect wallet"}
                 </button>
-                {wallet.status === "absent" && <span className="muted">install MetaMask, then reload this page.</span>}
-              </div>
-            )}
-            {wallet.error && (
-              <div className="notice bad">
-                <IconAlert size={16} /> {wallet.error}
+                <span className="fieldnote">{wallet.status === "connecting" ? "Approve the request in your wallet." : "Connecting is free and moves no funds."}</span>
               </div>
             )}
           </div>
@@ -302,8 +332,10 @@ export function Seller() {
         {connected && (
           <section className="card">
             <div className="card-h">
-              <h2>My listings</h2>
-              <span className="muted">{shortAddress(address!)}</span>
+              <h2>
+                My listings <span className="sub">names owned by {shortAddress(address!)}</span>
+              </h2>
+              {listings.length > 0 && <span className="pill">{listings.length}</span>}
             </div>
             <div className="card-b stack-sm">
               {listingsError && (
@@ -311,43 +343,64 @@ export function Seller() {
                   <IconAlert size={16} /> {listingsError}
                 </div>
               )}
-              {listings.length === 0 && !listingsError && <div className="muted">No names owned by this wallet yet. Register one below.</div>}
-              {listings.length > 0 && (
-                <div className="listings">
-                  {listings.map((row) => (
-                    <div
-                      key={row.label}
-                      className={`listing ${row.label === label ? "on" : ""}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => select(row)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          select(row);
-                        }
-                      }}
-                    >
-                      <div className="who">
-                        <b>{row.name}</b>
-                        <span className="pill">{row.depth}</span>
-                      </div>
-                      <div className="badges">
-                        {row.listed ? <span className="pill ok">listed on ENS</span> : <span className="pill warn">not minted</span>}
-                        {row.attested ? <span className="pill ok">attested</span> : <span className="pill">not attested</span>}
-                      </div>
-                      <div className="meta">
-                        <span>{row.capability}</span>
-                        <span className="num">{row.priceHbar} HBAR / call</span>
-                        <span className="mono">pays {row.payTo}</span>
-                        {row.upstream && <span className="mono truncate">{row.upstream}</span>}
-                      </div>
-                      <a className="navlink" href={ensExplorer(row.name)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                        ENS explorer <IconExternal size={14} />
-                      </a>
-                    </div>
-                  ))}
+              {listings.length === 0 && !listingsError && (
+                <div className="empty">
+                  <b>No names owned by this wallet yet</b>
+                  <span>Register one below and it will appear here with its ENS and Selfie Check status.</span>
                 </div>
+              )}
+              {listings.length > 0 && (
+                <>
+                  <p className="fieldnote">Pick a listing to load it into the form below, or to run Selfie Check for it.</p>
+                  <div className="listings">
+                    {listings.map((row) => (
+                      <div
+                        key={row.label}
+                        className={`listing ${row.label === label ? "on" : ""}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={row.label === label}
+                        onClick={() => select(row)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            select(row);
+                          }
+                        }}
+                      >
+                        <div className="who">
+                          <b className="truncate" title={row.name}>
+                            {row.name}
+                          </b>
+                          <span className="pill">{row.depth}</span>
+                        </div>
+                        <div className="badges">
+                          {row.listed ? <span className="pill ok">listed on ENS</span> : <span className="pill warn">not minted</span>}
+                          {row.attested ? <span className="pill ok">attested</span> : <span className="pill">not attested</span>}
+                        </div>
+                        <dl className="listing-meta">
+                          <dt>capability</dt>
+                          <dd>{row.capability}</dd>
+                          <dt>price</dt>
+                          <dd className="num">{row.priceHbar} HBAR / call</dd>
+                          <dt>pays</dt>
+                          <dd className="mono">{row.payTo}</dd>
+                          {row.upstream && (
+                            <>
+                              <dt>upstream</dt>
+                              <dd className="mono truncate" title={row.upstream}>
+                                {row.upstream}
+                              </dd>
+                            </>
+                          )}
+                        </dl>
+                        <a className="navlink" href={ensExplorer(row.name)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                          ENS explorer <IconExternal size={14} />
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </section>
@@ -355,7 +408,9 @@ export function Seller() {
 
         <section className="card">
           <div className="card-h">
-            <h2>Step 1 · Name, price and payout</h2>
+            <h2>
+              <span className="stepno">1</span> Name, price and payout
+            </h2>
             {name && (
               <a className="navlink" href={ensExplorer(name)} target="_blank" rel="noreferrer">
                 ENS explorer <IconExternal size={14} />
@@ -366,42 +421,64 @@ export function Seller() {
             <fieldset className="formset stack-sm" disabled={!connected || !!busy}>
               <div className="formgrid">
                 <label className="field">
-                  name
+                  <span className="labelrow">
+                    name <span className="hint">.{parent || "…"}</span>
+                  </span>
                   <input
                     className="text"
                     value={label}
                     maxLength={16}
                     placeholder="acme-risk"
                     spellCheck={false}
+                    aria-invalid={shown.label !== null}
                     onChange={(e) => setLabel(e.target.value.trim().toLowerCase())}
                   />
+                  {shown.label ? <span className="fieldnote bad">{shown.label}</span> : <span className="fieldnote">lowercase letters, digits and inner hyphens</span>}
                 </label>
                 <label className="field">
-                  tier
+                  <span className="labelrow">
+                    tier <span className="hint">listed on ENS</span>
+                  </span>
                   <select className="text" value={tier} onChange={(e) => setTier(e.target.value as Tier)}>
                     <option value="basic">basic</option>
                     <option value="pro">pro</option>
                   </select>
+                  <span className="fieldnote">how deep an assessment you serve</span>
                 </label>
                 <label className="field">
-                  price per call (HBAR)
-                  <input className="text num" value={price} inputMode="decimal" spellCheck={false} onChange={(e) => setPrice(e.target.value.trim())} />
+                  <span className="labelrow">
+                    price per call <span className="hint">HBAR</span>
+                  </span>
+                  <input className="text num" value={price} inputMode="decimal" spellCheck={false} aria-invalid={shown.price !== null} onChange={(e) => setPrice(e.target.value.trim())} />
+                  {shown.price ? <span className="fieldnote bad">{shown.price}</span> : <span className="fieldnote">what a buyer agent pays per call</span>}
                 </label>
                 <label className="field">
-                  Hedera payTo account
-                  <input className="text mono" value={payTo} placeholder="0.0.1234" spellCheck={false} onChange={(e) => setPayTo(e.target.value.trim())} />
+                  <span className="labelrow">
+                    payout account <span className="hint">Hedera</span>
+                  </span>
+                  <input className="text mono" value={payTo} placeholder="0.0.1234" spellCheck={false} aria-invalid={shown.payTo !== null} onChange={(e) => setPayTo(e.target.value.trim())} />
+                  {shown.payTo ? <span className="fieldnote bad">{shown.payTo}</span> : <span className="fieldnote">every settled call pays here</span>}
                 </label>
                 <label className="field">
-                  capability
-                  <input className="text" value={capability} spellCheck={false} onChange={(e) => setCapability(e.target.value)} />
+                  <span className="labelrow">capability</span>
+                  <input className="text" value={capability} spellCheck={false} aria-invalid={shown.capability !== null} onChange={(e) => setCapability(e.target.value)} />
+                  {shown.capability ? <span className="fieldnote bad">{shown.capability}</span> : <span className="fieldnote">what buyer agents search for</span>}
                 </label>
                 <label className="field">
-                  upstream API URL <span className="hint">optional</span>
+                  <span className="labelrow">
+                    upstream API URL <span className="hint">optional</span>
+                  </span>
                   <input className="text mono" value={upstream} placeholder="https://api.example.com/score" spellCheck={false} onChange={(e) => setUpstream(e.target.value.trim())} />
+                  <span className="fieldnote">
+                    listed on ENS as <span className="mono">mandi:upstream</span>; leave it empty and the demo scorer serves calls
+                  </span>
                 </label>
                 <label className="field wide">
-                  description <span className="hint">agent-context: one line telling a buyer agent what you sell</span>
-                  <textarea className="text" value={context} rows={2} onChange={(e) => setContext(e.target.value)} />
+                  <span className="labelrow">
+                    description <span className="hint">agent-context</span>
+                  </span>
+                  <textarea className="text" value={context} rows={2} aria-invalid={shown.context !== null} onChange={(e) => setContext(e.target.value)} />
+                  {shown.context ? <span className="fieldnote bad">{shown.context}</span> : <span className="fieldnote">one line telling a buyer agent what you sell</span>}
                 </label>
               </div>
               <div className="namepreview">
@@ -413,13 +490,17 @@ export function Seller() {
                   <>your name will be minted under {parent || "the Mandi registry"}</>
                 )}
               </div>
-              <p className="muted seller-note">Mandi will list the upstream endpoint on ENS as <span className="mono">mandi:upstream</span>; the demo scorer serves calls.</p>
               <div className="row">
-                <button type="button" className="btn primary" onClick={() => void register()} disabled={!connected || !!problem || !!busy}>
-                  {busy === "register" ? <Spinner size={14} /> : <IconArrow size={15} />} Sign &amp; register
+                <button type="button" className="btn primary" onClick={() => void register()} disabled={!connected || !!problem || !!busy} aria-busy={busy === "register"}>
+                  {busy === "register" ? <Spinner size={14} /> : <IconArrow size={15} />} {busy === "register" ? "Registering…" : "Sign & register"}
                 </button>
-                {connected && problem && <span className="muted">{problem}</span>}
-                {!connected && <span className="muted">connect a wallet to register</span>}
+                {!connected ? (
+                  <span className="fieldnote">connect a wallet to register</span>
+                ) : problem ? (
+                  <span className="fieldnote">{problem}</span>
+                ) : (
+                  <span className="fieldnote">your wallet signs the registration; Mandi pays the Sepolia gas</span>
+                )}
               </div>
             </fieldset>
             {busy === "register" && (
@@ -475,7 +556,7 @@ export function Seller() {
         <section className="card" ref={selfieRef}>
           <div className="card-h">
             <h2>
-              <IconShieldCheck size={16} /> Step 2 · Selfie Check
+              <span className="stepno">2</span> Selfie Check
             </h2>
             {result ? <span className="pill ok">attested</span> : ready ? <span className="pill warn">pending</span> : <span className="pill">register first</span>}
           </div>
@@ -508,7 +589,7 @@ export function Seller() {
               </div>
             </div>
             <div className="row">
-              <button type="button" className="btn primary" onClick={() => void startSelfie()} disabled={!connected || !ready || !appId || open || !!busy || !!result}>
+              <button type="button" className="btn primary" onClick={() => void startSelfie()} disabled={!connected || !ready || !appId || open || !!busy || !!result} aria-busy={busy === "selfie"}>
                 {busy === "selfie" ? <Spinner size={14} /> : <IconShieldCheck size={15} />} Start Selfie Check
               </button>
               {!appId && <span className="pill bad">VITE_WORLD_APP_ID is not set</span>}

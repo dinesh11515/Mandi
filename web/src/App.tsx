@@ -132,8 +132,22 @@ function Suppliers({ rows, loading, error, onRefresh }: { rows: SupplierRow[]; l
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="empty">
-                  {loading ? "resolving suppliers from the ENS directory…" : "no suppliers found in the directory"}
+                <td colSpan={9}>
+                  <div className="empty">
+                    {loading ? (
+                      <span className="row">
+                        <Spinner size={16} /> resolving suppliers from the ENS directory…
+                      </span>
+                    ) : (
+                      <>
+                        <b>No suppliers in the directory yet</b>
+                        <span>Names registered under the Mandi registry show up here with their price, accreditation and Reliability.</span>
+                        <a className="btn ghost sm" href={sellerHref()}>
+                          <IconShield size={14} /> Register a service
+                        </a>
+                      </>
+                    )}
+                  </div>
                 </td>
               </tr>
             )}
@@ -155,7 +169,7 @@ function Suppliers({ rows, loading, error, onRefresh }: { rows: SupplierRow[]; l
                   </td>
                   <td className="right num">{r.card.price}</td>
                   <td>
-                    <div className="row">
+                    <div className="row accred">
                       <Accreditation row={r} />
                       {!r.attestation?.valid && (
                         <a className="navlink" href={sellerHref(r.name.split(".")[0])}>
@@ -337,25 +351,42 @@ function FundingCard({ wallet, refreshToken }: { wallet: Wallet; refreshToken: n
             <div className="label">spent</div>
             <div className="value">{funding ? hbar(funding.spentHbar) : "–"}</div>
           </div>
-          <div>
+          <div className="lead">
             <div className="label">available</div>
             <div className="value">{funding ? hbar(funding.availableHbar) : "–"}</div>
           </div>
         </div>
         <div className="depositrow">
           <label className="field grow">
-            amount to deposit
-            <input className="text" type="number" min="0.01" step="0.1" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={!address || busy} aria-label="deposit amount in HBAR" />
+            <span className="labelrow">
+              amount to deposit <span className="hint">HBAR</span>
+            </span>
+            <input
+              className="text num"
+              type="number"
+              min="0.01"
+              step="0.1"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              disabled={!address || busy}
+              aria-invalid={address !== null && amountProblem !== null}
+              aria-label="deposit amount in HBAR"
+            />
           </label>
-          <button className="btn primary" onClick={() => void onDeposit()} disabled={!address || !executor || busy || amountProblem !== null}>
-            {busy ? <Spinner size={14} /> : <IconWallet size={15} />} {depositing ? "confirm in MetaMask" : waiting ? "waiting for the mirror node" : "Deposit from MetaMask"}
+          <button className="btn primary" onClick={() => void onDeposit()} disabled={!address || !executor || busy || amountProblem !== null} aria-busy={busy}>
+            {busy ? <Spinner size={14} /> : <IconWallet size={15} />} {depositing ? "confirm in your wallet" : waiting ? "waiting for the mirror node" : "Deposit"}
           </button>
           <button className="btn ghost sm" onClick={() => void refreshFunding()} disabled={!address || busy} title="refresh funding">
             <IconRefresh size={14} /> refresh
           </button>
         </div>
-        {address && amountProblem && <span className="dim">{amountProblem}</span>}
-        {!address && <span className="dim">connect a wallet to deposit HBAR; MetaMask will switch to Hedera testnet (chain 296) for the transfer</span>}
+        {!address ? (
+          <p className="fieldnote">Connect a wallet to deposit. It signs a single HBAR transfer to the executor and switches to Hedera testnet (chain 296) for it.</p>
+        ) : amountProblem ? (
+          <p className="fieldnote bad">{amountProblem}</p>
+        ) : (
+          <p className="fieldnote">Your wallet sends this to the executor account above. The executor may only spend it under a policy you signed.</p>
+        )}
         {error && (
           <div className="notice bad">
             <IconAlert size={16} /> {error}
@@ -374,19 +405,24 @@ function FundingCard({ wallet, refreshToken }: { wallet: Wallet; refreshToken: n
           </div>
         )}
         {funding && funding.deposits.length > 0 && (
-          <ul className="deposits">
-            {funding.deposits.map((d) => (
-              <li key={d.txId}>
-                <span className="num">{hbar(d.amountHbar)}</span>
-                <span className="dim">{stamp(d.consensusTimestamp)}</span>
-                <a href={d.hashscan} target="_blank" rel="noreferrer">
-                  HashScan <IconExternal size={12} />
-                </a>
-              </li>
-            ))}
-          </ul>
+          <div className="subsection">
+            <div className="subsection-h">
+              your deposits <span className="count">{funding.deposits.length}</span>
+            </div>
+            <ul className="deposits">
+              {funding.deposits.map((d) => (
+                <li key={d.txId}>
+                  <span className="num">{hbar(d.amountHbar)}</span>
+                  <span className="dim truncate">{stamp(d.consensusTimestamp)}</span>
+                  <a href={d.hashscan} target="_blank" rel="noreferrer">
+                    HashScan <IconExternal size={12} />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
-        {funding && funding.deposits.length === 0 && address && <span className="dim">no deposits from this wallet yet</span>}
+        {funding && funding.deposits.length === 0 && address && <p className="fieldnote">No deposits from this wallet yet.</p>}
       </div>
     </section>
   );
@@ -714,7 +750,15 @@ export function App() {
 
   return (
     <>
-      <Topbar topicUrl={topicUrl} wallet={wallet} />
+      <Topbar
+        topicUrl={topicUrl}
+        wallet={wallet}
+        right={
+          <a className="navlink" href={sellerHref()}>
+            <IconShield size={14} /> Register seller
+          </a>
+        }
+      />
       <main className="page">
         <div className="hero">
           <div>
@@ -780,26 +824,39 @@ export function App() {
                 <span className={`pill ${activation ? "ok" : ""}`}>{activation ? "active" : "not active"}</span>
               </div>
               <div className="card-b stack-sm">
-                <div className="chips" role="group" aria-label="policy presets">
-                  {Object.keys(PRESETS).map((name) => (
-                    <button key={name} type="button" className={`chip ${preset === name ? "on" : ""}`} onClick={() => applyPreset(name)}>
-                      {name}
-                    </button>
-                  ))}
+                <div className="fieldgroup">
+                  <span className="grouplabel">presets</span>
+                  <div className="chips" role="group" aria-label="policy presets">
+                    {Object.keys(PRESETS).map((name) => (
+                      <button key={name} type="button" className={`chip ${preset === name ? "on" : ""}`} aria-pressed={preset === name} onClick={() => applyPreset(name)}>
+                        {name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <textarea className="code" value={policyText} onChange={(e) => setPolicyText(e.target.value)} spellCheck={false} aria-label="policy json" />
+                <label className="field">
+                  <span className="labelrow">
+                    policy <span className="hint">the executor enforces exactly this</span>
+                  </span>
+                  <textarea className="code" value={policyText} onChange={(e) => setPolicyText(e.target.value)} spellCheck={false} aria-label="policy json" />
+                </label>
                 <div className="row between">
-                  <button className="btn primary" onClick={() => void onActivate()} disabled={activating || !connected}>
-                    {activating ? <Spinner size={14} /> : <IconShieldCheck size={15} />} Sign & activate
+                  <button className="btn primary" onClick={() => void onActivate()} disabled={activating || !connected} aria-busy={activating}>
+                    {activating ? <Spinner size={14} /> : <IconShieldCheck size={15} />} {activating ? "Signing…" : "Sign & activate"}
                   </button>
                   {activation && (
-                    <span className="row" style={{ gap: 4 }}>
-                      <span className="mono dim">{short(activation.policyHash, 8)}</span>
+                    <span className="row hashrow">
+                      <span className="dim">policy hash</span>
+                      <span className="mono">{short(activation.policyHash, 8)}</span>
                       <Copy text={activation.policyHash} />
                     </span>
                   )}
                 </div>
-                {!connected && <span className="dim">connect a wallet to sign the mandate</span>}
+                <p className="fieldnote">
+                  {connected
+                    ? "Your wallet signs this policy as a mandate. Signing moves no funds; the executor refuses to spend outside it."
+                    : "Connect a wallet to sign the mandate. Signing is free and moves no funds."}
+                </p>
                 {activationError && (
                   <div className="notice bad">
                     <IconAlert size={16} /> <span style={{ whiteSpace: "pre-wrap" }}>{activationError}</span>
@@ -856,22 +913,27 @@ export function App() {
                 </h2>
               </div>
               <div className="card-b stack-sm">
-                <div className="chips" role="group" aria-label="example tasks">
-                  {TASKS.map((t) => (
-                    <button key={t} type="button" className={`chip ${task === t ? "on" : ""}`} onClick={() => setTask(t)}>
-                      {t.replace("Assess risk of ", "")}
-                    </button>
-                  ))}
+                <div className="fieldgroup">
+                  <span className="grouplabel">examples</span>
+                  <div className="chips" role="group" aria-label="example tasks">
+                    {TASKS.map((t) => (
+                      <button key={t} type="button" className={`chip ${task === t ? "on" : ""}`} aria-pressed={task === t} onClick={() => setTask(t)}>
+                        {t.replace("Assess risk of ", "")}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <label className="field">
-                  task
+                  <span className="labelrow">
+                    task <span className="hint">plain language, sent to the buyer agent</span>
+                  </span>
                   <input className="text" type="text" value={task} onChange={(e) => setTask(e.target.value)} />
                 </label>
                 <div className="row between">
-                  <button className="btn primary" onClick={onRun} disabled={running || runBlock !== null}>
-                    {running ? <Spinner size={14} /> : <IconBolt size={15} />} {running ? "running" : "Run agent"}
+                  <button className="btn primary" onClick={onRun} disabled={running || runBlock !== null} aria-busy={running}>
+                    {running ? <Spinner size={14} /> : <IconBolt size={15} />} {running ? "Running…" : "Run agent"}
                   </button>
-                  {runBlock && !signerMismatch && <span className="dim">{runBlock}</span>}
+                  {runBlock && !signerMismatch && <span className="fieldnote">{runBlock}</span>}
                 </div>
                 {signerMismatch && (
                   <div className="notice bad">
@@ -882,7 +944,7 @@ export function App() {
             </section>
           </div>
 
-          <section className="card">
+          <section className="card sticky">
             <div className="card-h">
               <h2>
                 Pipeline <span className="sub">every stage streamed live from the agent</span>
@@ -906,7 +968,10 @@ export function App() {
             <Stepper events={events} running={running} />
             <div className="log" ref={logRef} role="log" aria-live="polite" aria-label="agent pipeline events" tabIndex={0}>
               {events.length === 0 && !runError && (
-                <div className="empty">Sign a policy, deposit HBAR and run a task. Discovery, eligibility, preference, authorization, payment and receipt will appear here with links to HashScan.</div>
+                <div className="empty">
+                  <b>Nothing has run yet</b>
+                  <span>Sign a policy, deposit HBAR, then run a task. Discovery, resolution, preference, authorization, payment and receipt stream in here, each with a link to HashScan.</span>
+                </div>
               )}
               {events.map((ev, i) => (
                 <Event key={i} ev={ev} ranking={ranking} />

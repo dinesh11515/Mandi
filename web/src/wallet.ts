@@ -24,6 +24,7 @@ export type Wallet = {
   error: string | null;
   connect: () => Promise<Address>;
   disconnect: () => void;
+  clearError: () => void;
   signMessage: (message: string) => Promise<Hex>;
   ensureChain: (chain: Chain) => Promise<void>;
   sendHbar: (to: Address, hbar: number) => Promise<Hex>;
@@ -33,9 +34,12 @@ const provider = () => window.ethereum;
 
 const client = (chain: Chain, account: Address) => createWalletClient({ account, chain, transport: custom(provider()!) });
 
+const NO_WALLET = "no browser wallet was found in this browser; install one, then reload this page";
+
 const describe = (err: unknown) => {
   const e = err as { shortMessage?: string; message?: string; code?: number };
-  if (e?.code === 4001) return "request rejected in the wallet";
+  if (e?.code === 4001) return "the request was rejected in your wallet";
+  if (e?.code === -32002) return "your wallet already has a pending request; open it and finish that one first";
   return e?.shortMessage ?? e?.message ?? String(err);
 };
 
@@ -72,7 +76,10 @@ export function useWallet(): Wallet {
 
   const connect = useCallback(async () => {
     const eth = provider();
-    if (!eth) throw new Error("no browser wallet found; install MetaMask");
+    if (!eth) {
+      setError(NO_WALLET);
+      throw new Error(NO_WALLET);
+    }
     setError(null);
     setStatus("connecting");
     try {
@@ -92,13 +99,16 @@ export function useWallet(): Wallet {
 
   const disconnect = useCallback(() => {
     setAddress(null);
+    setError(null);
     setStatus(provider() ? "disconnected" : "absent");
   }, []);
+
+  const clearError = useCallback(() => setError(null), []);
 
   const ensureChain = useCallback(
     async (chain: Chain) => {
       const eth = provider();
-      if (!eth) throw new Error("no browser wallet found; install MetaMask");
+      if (!eth) throw new Error(NO_WALLET);
       if (!address) throw new Error("connect a wallet first");
       const wallet = client(chain, address);
       const chainNow = async () => Number(await eth.request({ method: "eth_chainId" }));
@@ -149,7 +159,12 @@ export function useWallet(): Wallet {
     [address, ensureChain],
   );
 
-  return { status, address, chainId, error, connect, disconnect, signMessage, ensureChain, sendHbar };
+  return { status, address, chainId, error, connect, disconnect, clearError, signMessage, ensureChain, sendHbar };
 }
 
 export const shortAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+export const chainLabel = (id: number | null): string | null =>
+  id === null ? null : id === hederaTestnet.id ? "Hedera testnet" : id === sepolia.id ? "Sepolia" : `chain ${id}`;
+
+export const WALLET_GUIDE = "https://ethereum.org/en/wallets/find-wallet/";
