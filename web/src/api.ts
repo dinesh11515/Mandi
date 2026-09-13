@@ -191,7 +191,7 @@ export function stream(task: string, policyHash: string, token: string, onEvent:
   };
 }
 
-export const ensExplorer = (name: string) => `https://explorer.ens.dev/name/${name}`;
+export const ensExplorer = (name: string) => `https://app.ens.dev/${name}`;
 export const sepoliaTx = (hash: string) => `https://sepolia.etherscan.io/tx/${hash}`;
 export const hashscanTx = (id: string) => `https://hashscan.io/testnet/transaction/${id.replace("@", "-").replace(/\.(\d+)$/, "-$1")}`;
 export const hashscanAccount = (id: string) => `https://hashscan.io/testnet/account/${id}`;

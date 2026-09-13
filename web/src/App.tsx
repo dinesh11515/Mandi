@@ -640,6 +640,54 @@ function Stepper({ events, running }: { events: AgentEvent[]; running: boolean }
   );
 }
 
+function TaskRunner({
+  task,
+  onTask,
+  running,
+  runBlock,
+  signerMismatch,
+  onRun,
+}: {
+  task: string;
+  onTask: (value: string) => void;
+  running: boolean;
+  runBlock: string | null;
+  signerMismatch: boolean;
+  onRun: () => void;
+}) {
+  return (
+    <div className="runner">
+      <div className="fieldgroup">
+        <span className="grouplabel">examples</span>
+        <div className="chips" role="group" aria-label="example tasks">
+          {TASKS.map((t) => (
+            <button key={t} type="button" className={`chip ${task === t ? "on" : ""}`} aria-pressed={task === t} onClick={() => onTask(t)}>
+              {t.replace("Assess risk of ", "")}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="runnerrow">
+        <label className="field grow">
+          <span className="labelrow">
+            task <span className="hint">plain language, sent to the buyer agent</span>
+          </span>
+          <input className="text" type="text" value={task} onChange={(e) => onTask(e.target.value)} aria-label="task" />
+        </label>
+        <button className="btn primary" onClick={onRun} disabled={running || runBlock !== null} aria-busy={running}>
+          {running ? <Spinner size={14} /> : <IconBolt size={15} />} {running ? "Running…" : "Run agent"}
+        </button>
+      </div>
+      {runBlock && !signerMismatch && <p className="fieldnote">{runBlock}</p>}
+      {signerMismatch && (
+        <div className="notice bad">
+          <IconAlert size={16} /> {runBlock}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function App() {
   const wallet = useWallet();
   const [rows, setRows] = useState<SupplierRow[]>([]);
@@ -905,43 +953,6 @@ export function App() {
             </section>
 
             <FundingCard wallet={wallet} refreshToken={fundingToken} />
-
-            <section className="card">
-              <div className="card-h">
-                <h2>
-                  Task <span className="sub">the agent plans, the executor authorizes</span>
-                </h2>
-              </div>
-              <div className="card-b stack-sm">
-                <div className="fieldgroup">
-                  <span className="grouplabel">examples</span>
-                  <div className="chips" role="group" aria-label="example tasks">
-                    {TASKS.map((t) => (
-                      <button key={t} type="button" className={`chip ${task === t ? "on" : ""}`} aria-pressed={task === t} onClick={() => setTask(t)}>
-                        {t.replace("Assess risk of ", "")}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <label className="field">
-                  <span className="labelrow">
-                    task <span className="hint">plain language, sent to the buyer agent</span>
-                  </span>
-                  <input className="text" type="text" value={task} onChange={(e) => setTask(e.target.value)} />
-                </label>
-                <div className="row between">
-                  <button className="btn primary" onClick={onRun} disabled={running || runBlock !== null} aria-busy={running}>
-                    {running ? <Spinner size={14} /> : <IconBolt size={15} />} {running ? "Running…" : "Run agent"}
-                  </button>
-                  {runBlock && !signerMismatch && <span className="fieldnote">{runBlock}</span>}
-                </div>
-                {signerMismatch && (
-                  <div className="notice bad">
-                    <IconAlert size={16} /> {runBlock}
-                  </div>
-                )}
-              </div>
-            </section>
           </div>
 
           <section className="card sticky">
@@ -965,12 +976,13 @@ export function App() {
                 </button>
               ) : null}
             </div>
+            <TaskRunner task={task} onTask={setTask} running={running} runBlock={runBlock} signerMismatch={signerMismatch} onRun={onRun} />
             <Stepper events={events} running={running} />
             <div className="log" ref={logRef} role="log" aria-live="polite" aria-label="agent pipeline events" tabIndex={0}>
               {events.length === 0 && !runError && (
                 <div className="empty">
                   <b>Nothing has run yet</b>
-                  <span>Sign a policy, deposit HBAR, then run a task. Discovery, resolution, preference, authorization, payment and receipt stream in here, each with a link to HashScan.</span>
+                  <span>Sign a policy, deposit HBAR, then run a task above. Discovery, resolution, preference, authorization, payment and receipt stream in here, each with a link to HashScan.</span>
                 </div>
               )}
               {events.map((ev, i) => (

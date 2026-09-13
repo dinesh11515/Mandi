@@ -292,6 +292,11 @@ label.field { display: grid; gap: 6px; font-size: var(--fs-xs); font-weight: 500
 .depositrow { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
 .depositrow .grow { flex: 1 1 140px; min-width: 120px; }
 .depositrow .btn { flex: 0 0 auto; }
+
+.runner { display: grid; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
+.runnerrow { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.runnerrow .grow { flex: 1 1 220px; min-width: 180px; }
+.runnerrow .btn { flex: 0 0 auto; }
 .deposits { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1); max-height: 148px; overflow: auto; }
 .deposits li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: var(--fs-sm);
   padding: 6px 10px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius-sm); }
@@ -306,7 +311,7 @@ label.field { display: grid; gap: 6px; font-size: var(--fs-xs); font-weight: 500
 .step.active i { background: var(--accent); }
 .step.failed i { background: var(--bad); }
 
-.log { display: grid; gap: 0; max-height: calc(100dvh - 260px); overflow: auto; padding: var(--s2) var(--s4) var(--s4); }
+.log { display: grid; gap: 0; max-height: calc(100dvh - 420px); overflow: auto; padding: var(--s2) var(--s4) var(--s4); }
 .log:focus-visible { outline-offset: -2px; }
 .ev { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: var(--s3); padding: 10px 0; animation: rise 200ms var(--ease) both; }
 .ev::before { content: ""; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; background: var(--line); }
@@ -411,6 +416,9 @@ pre.json { margin: 0; padding: var(--s3); background: var(--bg-elev); border: 1p
   .depositrow .grow { flex-basis: 100%; }
   .depositrow .btn.primary { flex: 1 1 auto; width: auto; }
   .depositrow .btn.ghost { flex: 0 0 auto; width: auto; }
+  .runner { padding: var(--s3); }
+  .runnerrow .grow { flex-basis: 100%; }
+  .runnerrow .btn.primary { flex: 1 1 auto; }
   .hero h1 { font-size: 20px; }
   .card-h { padding: var(--s3); }
   .card-b { padding: var(--s3); }

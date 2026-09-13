@@ -395,7 +395,7 @@ export function Seller() {
                           )}
                         </dl>
                         <a className="navlink" href={ensExplorer(row.name)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                          ENS explorer <IconExternal size={14} />
+                          ENS <IconExternal size={14} />
                         </a>
                       </div>
                     ))}
@@ -413,7 +413,7 @@ export function Seller() {
             </h2>
             {name && (
               <a className="navlink" href={ensExplorer(name)} target="_blank" rel="noreferrer">
-                ENS explorer <IconExternal size={14} />
+                ENS <IconExternal size={14} />
               </a>
             )}
           </div>
@@ -527,7 +527,7 @@ export function Seller() {
                     {registered.minted ? "minted" : "records refreshed"} {registered.name}
                   </b>
                   <a className="navlink" href={ensExplorer(registered.name)} target="_blank" rel="noreferrer">
-                    ENS explorer <IconExternal size={14} />
+                    ENS <IconExternal size={14} />
                   </a>
                 </div>
                 <div className="row">

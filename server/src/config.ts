@@ -166,7 +166,7 @@ export const config = {
     resolver: env("ENS_RESOLVER"),
     fromBlock: env("ENS_FROM_BLOCK"),
     sellerAddress: env("SELLER_EVM_ADDRESS"),
-    explorer: env("ENS_EXPLORER_URL") || "https://explorer.ens.dev/name/",
+    explorer: env("ENS_EXPLORER_URL") || "https://app.ens.dev/",
   },
   graphApiKey: env("GRAPH_API_KEY"),
   webDist: env("WEB_DIST"),

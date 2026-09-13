@@ -120,7 +120,7 @@ async function main() {
 
   console.log(`add to .env: ENS_SUBREGISTRY=${subregistry}`);
   console.log(`add to .env: ENS_RESOLVER=${resolver}`);
-  console.log(`https://explorer.ens.dev/name/${config.ens.parentName}`);
+  console.log(`https://app.ens.dev/${config.ens.parentName}`);
 }
 
 main().catch((err) => {

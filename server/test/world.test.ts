@@ -130,7 +130,7 @@ describe("verifyAndAttest", () => {
   it("advertises the parent name and explorer without a wallet", () => {
     const cfg = worldConfig();
     expect(cfg.parent).toBe("mandi.eth");
-    expect(cfg.explorer).toContain("explorer.ens.dev");
+    expect(cfg.explorer).toContain("app.ens.dev");
     expect(cfg.labels).toContain("risk-basic");
     expect("wallet" in cfg).toBe(false);
   });
