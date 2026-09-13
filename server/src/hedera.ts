@@ -2,10 +2,12 @@ import {
   AccountBalanceQuery,
   AccountId,
   Client,
+  Hbar,
   PrivateKey,
   TopicCreateTransaction,
   TopicId,
   TopicMessageSubmitTransaction,
+  TransferTransaction,
 } from "@hiero-ledger/sdk";
 import { config, requireEnv } from "./config";
 
@@ -42,6 +44,20 @@ export async function createTopic(memo: string): Promise<string> {
   const response = await new TopicCreateTransaction().setTopicMemo(memo).execute(client);
   const receipt = await response.getReceipt(client);
   return receipt.topicId!.toString();
+}
+
+export async function fundEvmAddress(address: string, hbar: number): Promise<string> {
+  const client = operatorClient();
+  const amount = new Hbar(hbar);
+  const response = await new TransferTransaction()
+    .addHbarTransfer(client.operatorAccountId!, amount.negated())
+    .addHbarTransfer(AccountId.fromEvmAddress(0, 0, address), amount)
+    .setMaxTransactionFee(new Hbar(2))
+    .setTransactionMemo("mandi fund-evm")
+    .execute(client);
+  const receipt = await response.getReceipt(client);
+  if (receipt.status.toString() !== "SUCCESS") throw new Error(`transfer failed: ${receipt.status.toString()}`);
+  return response.transactionId.toString();
 }
 
 export type HcsMessage = Record<string, unknown> & { type: string };
