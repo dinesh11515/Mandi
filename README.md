@@ -101,7 +101,7 @@ Run the tests with `pnpm test` (37 cases: policy hashing and activation, executo
 |---|---|---|
 | `GRAPH_API_KEY` | The Graph, and the video. Without it suppliers return placeholder scores that say so in `notes` | thegraph.com/studio → API Keys → Create. The free allowance covers the demo |
 | `WORLD_RP_ID`, `WORLD_SIGNING_KEY` | World. Signs each Selfie Check request and names the app to the verify endpoint | developer.world.org → your app → Enable World ID 4.0 → copy `rp_id` and the one-time signing key |
-| `VITE_WORLD_APP_ID` (in `web/.env`) | World. The widget's app id | Same app page → App ID |
+| `VITE_WORLD_APP_ID` | World. The widget's app id. Vite loads it from the repo-root `.env`; the Docker image bakes it in at build time via `ARG VITE_WORLD_APP_ID` | Same app page → App ID |
 
 **Optional, with defaults**
 
@@ -159,7 +159,7 @@ The last two lines rewrite the ENS endpoint records to the public URL and prove 
 
 ### World: Selfie Check as an eligibility signal
 
-- A seller runs Selfie Check (World ID Sandbox, `environment: "sandbox"`, `selfieCheckLegacy({ signal: sellerWallet })`) from `/seller`. The server signs the request context with the RP signing key, forwards the proof to the v4 verify endpoint, checks the signal hash against the seller wallet, enforces one accreditation per human via a hashed nullifier, and issues a verifier-signed attestation bound to the ENS name and wallet with a 90-day expiry.
+- A seller runs Selfie Check against production World App (`environment: "production"`, `selfieCheckLegacy({ signal: sellerWallet })`) from `/seller`. Scan the QR from a laptop or open the page inside World App — IDKit uses the native handoff there. The server signs the request context with the RP signing key, forwards the proof to the v4 verify endpoint, checks the signal hash against the seller wallet, enforces one accreditation per human via a hashed nullifier, and issues a verifier-signed attestation bound to the ENS name and wallet with a 90-day expiry.
 - The executor enforces `requireVerifiedFor` against that attestation only. Flipping `mandi:verified` on ENS by hand changes nothing; the decision says so in its reason.
 - Feedback document: [docs/WORLD_FEEDBACK.md](docs/WORLD_FEEDBACK.md).
 
@@ -174,7 +174,7 @@ The last two lines rewrite the ENS endpoint records to the public URL and prove 
 - **Single process, reference executor.** Buyer and market code run in one Hono process for the demo. The executor's guarantee is a module boundary, not process isolation or custody infrastructure.
 - **Reliability is not accuracy.** Receipts prove calls, failures, latency and cost. Nothing measures whether a risk score was right. Outcome oracles are future work.
 - **Failure semantics follow x402 v2.** In the `authorization` flow the facilitator settles after a successful response, so a failed supplier call is cancelled rather than paid. Receipts record `settled:false, fulfilled:false`. The buyer loses nothing on a failed call; reliability still records the miss.
-- **Selfie Check is a low-assurance credential.** The attestation says a live human completed the check for this wallet. It is not a one-person-one-account guarantee.
+- **Selfie Check is a medium-assurance credential.** The attestation says a live human completed the check for this wallet. It is not Orb-grade uniqueness.
 - **Placeholder scores** are returned only when `GRAPH_API_KEY` is missing, and they say so in `notes`. Set the key before recording or judging.
 - **No LLM in the loop.** Task planning is a keyword map and every decision is deterministic. An LLM explanation paragraph is a roadmap item and would never sit on the payment path.
 
@@ -206,7 +206,7 @@ Live subgraph data confirmed through paid calls on Sept 10: `Assess risk of Aave
 
 Still pending:
 
-- Selfie Check on the World ID Sandbox app, which needs the beta flag and a phone.
+- Selfie Check on production World App (needs the Selfie Check flag on the Developer Portal app, a production action `mandi-supplier-accreditation`, and a phone with World App).
 
 ## Roadmap
 

@@ -13,7 +13,7 @@ import { registerReceiptHooks } from "./market/receipts";
 import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
 import { PurchaseIntentSchema } from "./types";
-import { attestationLookup, getAttestation, rpContext, verifyAndAttest, verifyAttestation } from "./world";
+import { attestationLookup, getAttestation, signedWorldRequest, verifyAndAttest, verifyAttestation } from "./world";
 
 registerReceiptHooks();
 lookups.reliability = (name) => reliabilityFor(labelOf(name));
@@ -90,7 +90,7 @@ app.get("/reliability/:name", async (c) => {
 
 app.post("/world/rp-signature", (c) => {
   try {
-    return c.json(rpContext());
+    return c.json(signedWorldRequest());
   } catch (err) {
     return c.json({ error: message(err) }, 400);
   }

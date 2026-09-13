@@ -2,7 +2,7 @@
 
 Mandi uses Selfie Check as a **supplier accreditation signal**: a seller who completes Selfie Check receives a verifier-signed attestation bound to their ENS name and wallet, and the buyer's policy executor refuses to pay unverified suppliers when the human's policy says `requireVerifiedFor: ["financial"]`. The ENS `mandi:verified` text record is only a display hint; authorization reads the attestation.
 
-This document is kept open during the build. Sections 3 and 4 are filled while testing with the Sandbox app; entries marked *pending* still need a device run.
+This document is kept open during the build. Sections 3 and 4 are filled while testing with production World App; entries marked *pending* still need a device run.
 
 ## 1. Docs and integration flow
 
@@ -16,15 +16,15 @@ This document is kept open during the build. Sections 3 and 4 are filled while t
 ## 2. Developer Portal navigation
 
 - Creating an external app, enabling World ID 4.0 to mint `rp_id` and the one-time signing key, and copying `app_id` were straightforward.
-- Actions are auto-created on first successful verify in the resolved environment. Because sandbox resolves to staging, an action created manually under production is not the one a sandbox proof hits. Mandi uses a single stable action string `mandi-supplier-accreditation`.
-- Selfie Check (Beta) is access-gated. The only documented request path is email to developers@toolsforhumanity.com; the hackathon brief also points at a form and the ETHGlobal Discord channel. It is not documented whether the flag is needed for Sandbox as well as production. *pending: date requested, date enabled.*
+- Actions are auto-created on first successful verify in the resolved environment. Mandi now requests `environment: "production"`, so the action `mandi-supplier-accreditation` must exist (or be auto-created) under production, not staging/sandbox.
+- Selfie Check shipped to production World App. The Developer Portal still treats it as a gated feature per app. Confirm the flag is on for Mandi's `app_id` before a demo. *pending: date requested, date enabled.*
 
-## 3. Sandbox app states, flows, test users, errors, edge cases
+## 3. Production World App states, flows, test users, errors, edge cases
 
 *pending device testing*
 
-- iOS TestFlight link: https://testflight.apple.com/join/VZEurhHe. *pending: whether the beta had capacity.*
-- Android: request via Developer Portal → World ID Sandbox. *pending.*
+- Production World App from the App Store / Play Store. No sandbox build.
+- Demo path: open `/seller?name=risk-pro` on a laptop and scan the QR, or open the same URL inside World App (native IDKit transport, no QR).
 - Observed states when scanning the QR from the seller page: *pending.*
 - Error codes seen (`credential_unavailable`, `feature_unavailable`, `invalid_rp_signature`, `nullifier_replayed`, …): *pending.*
 - Repeating the check for the same wallet and action returns the same nullifier; Mandi treats that as a renewal, not a second accreditation. *pending confirmation on device.*
@@ -32,7 +32,7 @@ This document is kept open during the build. Sections 3 and 4 are filled while t
 
 ## 4. Confusing, missing, broken, or hard to test
 
-- The desktop simulator does not offer Selfie Check, so there is no way to exercise the flow without a phone and the sandbox build.
+- The desktop simulator does not offer Selfie Check. Production demos need a phone with World App.
 - The v4 verify response returning 200 on nullifier reuse is surprising; a distinct status or `code` would be safer.
 - Sandbox is missing from the published OpenAPI `environment` enum even though the handler accepts it.
 - *pending: anything hit during device testing.*

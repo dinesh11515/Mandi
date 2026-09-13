@@ -255,6 +255,7 @@ pre.json { margin: 0; padding: 12px; background: var(--bg-elev); border: 1px sol
   .topbar { padding: 10px 16px; }
   .name { min-width: 160px; max-width: 220px; }
   .page { padding: 16px 16px 48px; }
+  .seller-wrap { padding: 16px 16px 48px; }
   .kpis { grid-template-columns: 1fr 1fr; }
   .stepper { grid-template-columns: repeat(3, 1fr); }
   .check { grid-template-columns: 20px 1fr; }

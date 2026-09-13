@@ -129,7 +129,14 @@ function Suppliers({ rows, loading, error, onRefresh }: { rows: SupplierRow[]; l
                   </td>
                   <td className="right num">{r.card.price}</td>
                   <td>
-                    <Accreditation row={r} />
+                    <div className="row">
+                      <Accreditation row={r} />
+                      {!r.attestation?.valid && (
+                        <a className="navlink" href={`/seller?name=${r.name.split(".")[0]}`}>
+                          accredit
+                        </a>
+                      )}
+                    </div>
                   </td>
                   <td>
                     <div className="rate">

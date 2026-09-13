@@ -6,12 +6,30 @@ import { Topbar } from "./Shell";
 
 type Attestation = { name: string; wallet: string; hashedNullifier: string; expiry: number; issuer: string; sig: string };
 
+type SignedWorldRequest = { rp_context: RpContext; action: string; wallet: string };
+
+const IDKIT_ERRORS: Record<string, string> = {
+  user_rejected: "Selfie Check was cancelled in World App. Start again when you are ready.",
+  verification_rejected: "Selfie Check was cancelled in World App. Start again when you are ready.",
+  cancelled: "Selfie Check was cancelled. Start again when you are ready.",
+  credential_unavailable: "Selfie Check is not available for this World App account. Confirm the feature is enabled on the Mandi app in the Developer Portal.",
+  feature_unavailable: "Selfie Check is not enabled for this app. Enable it on the World Developer Portal, then retry.",
+  invalid_network: "World App is production; Mandi must request environment=production. Redeploy if this persists.",
+  invalid_rp_signature: "Relying-party signature was rejected. Check WORLD_SIGNING_KEY and WORLD_RP_ID.",
+  unknown_rp: "This rp_id is not registered. Enable World ID 4.0 on the app and wait until production registration is complete.",
+  inactive_rp: "The relying party is registered but inactive.",
+  malformed_request: "IDKit request was malformed. Check VITE_WORLD_APP_ID, action, and rp_context.",
+  connection_failed: "Could not reach World App. Open this page on your phone in World App, or scan the QR from a laptop.",
+  timeout: "World App did not return a proof in time. Start Selfie Check again.",
+};
+
 export function Seller() {
   const params = new URLSearchParams(location.search);
   const label = params.get("name") ?? "risk-pro";
-  const wallet = params.get("wallet") ?? "";
   const appId = (import.meta.env.VITE_WORLD_APP_ID as string | undefined) ?? "";
+  const [wallet, setWallet] = useState(params.get("wallet") ?? "");
   const [rp, setRp] = useState<RpContext | null>(null);
+  const [action, setAction] = useState("mandi-supplier-accreditation");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,9 +40,13 @@ export function Seller() {
     setBusy(true);
     try {
       const res = await fetch(`${API}/world/rp-signature`, { method: "POST" });
-      const body = await res.json();
+      const body = (await res.json()) as SignedWorldRequest & { error?: string };
       if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-      setRp(body as RpContext);
+      const nextWallet = wallet || body.wallet;
+      if (!nextWallet) throw new Error("no seller wallet in the URL or on the server");
+      setWallet(nextWallet);
+      setAction(body.action);
+      setRp(body.rp_context);
       setOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -40,7 +62,11 @@ export function Seller() {
       body: JSON.stringify({ label, wallet, idkitResponse }),
     });
     const body = await res.json();
-    if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+    if (!res.ok) {
+      const message = (body as { error?: string }).error ?? `${res.status}`;
+      setError(message);
+      throw new Error(message);
+    }
     setResult(body);
   };
 
@@ -53,7 +79,10 @@ export function Seller() {
         <div className="hero">
           <div>
             <h1>Seller accreditation</h1>
-            <p>Selfie Check binds a verified human to a supplier name. Buyers whose policy says <span className="mono">requireVerifiedFor</span> will only pay accredited suppliers. The attestation is signed by Mandi's verifier; the ENS flag is a display hint only.</p>
+            <p>
+              Selfie Check binds a verified human to a supplier name. Buyers whose policy says <span className="mono">requireVerifiedFor</span> will only pay accredited
+              suppliers. The attestation is signed by Mandi's verifier; the ENS flag is a display hint only.
+            </p>
           </div>
         </div>
         <section className="card">
@@ -68,12 +97,12 @@ export function Seller() {
           <div className="card-b stack-sm">
             <dl className="kv">
               <dt>seller wallet</dt>
-              <dd className="mono truncate">{wallet || <span className="pill bad">missing ?wallet= in the URL</span>}</dd>
+              <dd className="mono truncate">{wallet || <span className="pill">filled when Selfie Check starts</span>}</dd>
               <dt>signal</dt>
               <dd className="muted">the wallet address, so the proof cannot be replayed for another seller</dd>
               <dt>environment</dt>
               <dd>
-                <span className="pill info">World ID Sandbox</span>
+                <span className="pill info">World App · production</span>
               </dd>
             </dl>
             <div className="steps">
@@ -87,8 +116,8 @@ export function Seller() {
               <div className={`stepcard ${step > 2 ? "done" : step === 2 ? "active" : ""}`}>
                 <span className="n">{step > 2 ? <IconCheck size={13} /> : "2"}</span>
                 <div>
-                  <b>Scan with the Sandbox app</b>
-                  <div className="muted">Complete the selfie flow. The proof is verified against World's v4 endpoint and the signal is checked against the wallet.</div>
+                  <b>Complete in World App</b>
+                  <div className="muted">Scan the QR from a laptop, or open this page inside World App — IDKit uses the native handoff there. No sandbox build.</div>
                 </div>
               </div>
               <div className={`stepcard ${step === 3 ? "done" : ""}`}>
@@ -100,7 +129,7 @@ export function Seller() {
               </div>
             </div>
             <div className="row">
-              <button className="btn primary" onClick={start} disabled={!wallet || !appId || open || busy || !!result}>
+              <button className="btn primary" onClick={start} disabled={!appId || open || busy || !!result}>
                 {busy ? <Spinner size={14} /> : <IconArrow size={15} />} Start Selfie Check
               </button>
               {!appId && <span className="pill bad">VITE_WORLD_APP_ID is not set</span>}
@@ -110,20 +139,23 @@ export function Seller() {
                 <IconAlert size={16} /> {error}
               </div>
             )}
-            {rp && (
+            {rp && wallet && (
               <IDKitRequestWidget
                 open={open}
                 onOpenChange={setOpen}
                 app_id={appId as `app_${string}`}
-                action="mandi-supplier-accreditation"
+                action={action}
                 action_description={`Accredit ${label}.mandi.eth on Mandi`}
                 rp_context={rp}
                 allow_legacy_proofs={true}
-                environment="sandbox"
+                environment="production"
                 preset={selfieCheckLegacy({ signal: wallet })}
                 handleVerify={handleVerify}
                 onSuccess={() => setOpen(false)}
-                onError={(code, report) => setError(`${code} ${report ? JSON.stringify(report) : ""}`)}
+                onError={(code) => {
+                  if (code === "failed_by_host_app") return;
+                  setError(IDKIT_ERRORS[code] ?? code);
+                }}
               />
             )}
             {result && (
@@ -134,7 +166,8 @@ export function Seller() {
                 </div>
                 <div className="muted">
                   ENS <span className="mono">mandi:verified</span>:{" "}
-                  {result.ensTx ? <span className="mono">{result.ensTx.slice(0, 18)}…</span> : <span className="pill warn">{result.ensError}</span>} <span className="dim">(display hint only)</span>
+                  {result.ensTx ? <span className="mono">{result.ensTx.slice(0, 18)}…</span> : <span className="pill warn">{result.ensError}</span>}{" "}
+                  <span className="dim">(display hint only)</span>
                 </div>
                 <pre className="json">{JSON.stringify(result.attestation, null, 2)}</pre>
                 <a href="/">

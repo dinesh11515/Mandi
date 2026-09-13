@@ -50,7 +50,7 @@ describe("verifyAndAttest", () => {
     protocol_version: "3.0",
     nonce: "n",
     action: "mandi-supplier-accreditation",
-    environment: "sandbox",
+    environment: "production",
     responses: [{ identifier: "selfie", signal_hash: hashSignal(signal), proof: "0x00", merkle_root: "0x01", nullifier }],
   });
 
@@ -72,6 +72,16 @@ describe("verifyAndAttest", () => {
         { fetch: fakeFetch({ success: true, nullifier: "0xnull-2" }) },
       ),
     ).rejects.toThrow("signal does not match");
+  });
+
+  it("rejects a non-selfie credential", async () => {
+    const orb = {
+      ...proof(wallet, "0xnull-orb"),
+      responses: [{ identifier: "orb", signal_hash: hashSignal(wallet), proof: "0x00", merkle_root: "0x01", nullifier: "0xnull-orb" }],
+    };
+    await expect(verifyAndAttest({ label: "risk-basic", wallet, idkitResponse: orb }, { fetch: fakeFetch({ success: true, nullifier: "0xnull-orb" }) })).rejects.toThrow(
+      "expected a selfie credential",
+    );
   });
 
   it("rejects a World failure and a nullifier already bound to another name", async () => {

@@ -7,7 +7,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { namehash } from "viem/ens";
 import { canonicalize, sha256 } from "./buyer/policy";
 import { config, requireEnv, supplierByLabel } from "./config";
-import { RECORD_KEYS, serviceName, setTextRecord } from "./ens";
+import { deployerAccount, RECORD_KEYS, serviceName, setTextRecord } from "./ens";
 
 export const WORLD_ACTION = process.env.WORLD_ACTION || "mandi-supplier-accreditation";
 export const ATTESTATION_TTL_SECONDS = 90 * 24 * 60 * 60;
@@ -23,6 +23,15 @@ export function rpContext(): RpContext {
     expires_at: signed.expiresAt,
     signature: signed.sig,
   };
+}
+
+export function sellerWallet(): Address {
+  if (config.ens.sellerAddress) return config.ens.sellerAddress as Address;
+  return deployerAccount().address;
+}
+
+export function signedWorldRequest(): { rp_context: RpContext; action: string; wallet: Address } {
+  return { rp_context: rpContext(), action: WORLD_ACTION, wallet: sellerWallet() };
 }
 
 export type AttestationPayload = {
@@ -108,7 +117,7 @@ export async function attestationLookup(name: string): Promise<AttestationStatus
 
 type VerifyResponse = { success?: boolean; action?: string; nullifier?: string; code?: string; detail?: string; message?: string };
 
-type IdkitResponse = { responses?: { signal_hash?: string; nullifier?: string }[] };
+type IdkitResponse = { responses?: { identifier?: string; signal_hash?: string; nullifier?: string }[] };
 
 export type VerifyDeps = { fetch: typeof fetch };
 
@@ -130,6 +139,9 @@ export async function verifyAndAttest(
   const item = (input.idkitResponse as IdkitResponse).responses?.[0];
   const nullifier = data.nullifier ?? item?.nullifier;
   if (!nullifier) throw new Error("verify response carries no nullifier");
+  if (item?.identifier && item.identifier !== "selfie" && item.identifier !== "face") {
+    throw new Error(`expected a selfie credential, got ${item.identifier}`);
+  }
   if (!item?.signal_hash || item.signal_hash.toLowerCase() !== hashSignal(input.wallet).toLowerCase()) {
     throw new Error("proof signal does not match the seller wallet");
   }
