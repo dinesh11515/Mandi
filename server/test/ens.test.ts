@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 process.env.SELLER_ACCOUNT_ID = "0.0.1234";
 process.env.SELLERS_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mandi-sellers-")), "sellers.json");
 
-const { allSuppliers, assertSellerLabel, supplierByLabel, upsertSupplier } = await import("../src/config");
-const { registerService, serviceRecords } = await import("../src/ens");
+const { allSuppliers, assertSellerLabel, removeSupplier, supplierByLabel, upsertSupplier } = await import("../src/config");
+const { canonicalIdOf, labelIdOf, registerService, registryAbi, serviceRecords } = await import("../src/ens");
 
 describe("seller listings", () => {
   it("rejects a bad label before touching chain", async () => {
@@ -63,6 +63,20 @@ describe("seller listings", () => {
       upstream: "https://loud.example/assess",
     });
     expect(serviceRecords("loud-risk")["mandi:upstream"]).toBe("https://loud.example/assess");
+  });
+
+  it("removes only rows the sellers file owns", () => {
+    expect(removeSupplier("quiet-risk")).toBe(true);
+    expect(supplierByLabel("quiet-risk")).toBeUndefined();
+    expect(removeSupplier("quiet-risk")).toBe(false);
+    expect(removeSupplier("risk-basic")).toBe(false);
+    expect(allSuppliers().map((s) => s.label)).toContain("risk-basic");
+  });
+
+  it("exposes an ownerOf reader and the version-masked token id", () => {
+    expect(registryAbi.some((item) => "name" in item && item.name === "ownerOf")).toBe(true);
+    expect(canonicalIdOf("acme-risk")).toBe((labelIdOf("acme-risk") >> 32n) << 32n);
+    expect(canonicalIdOf("acme-risk") % (1n << 32n)).toBe(0n);
   });
 
   it("skips a malformed row in the sellers file instead of serving it", () => {

@@ -7,13 +7,13 @@ import { z } from "zod";
 import { config } from "./config";
 import { run, type AgentEvent } from "./buyer/agent";
 import { executeIntent, lookups } from "./buyer/executor";
-import { activatePolicy, describeActivation, getActivePolicy } from "./buyer/policy";
+import { activatePolicy, describeActivation, getActivePolicy, runTokenMatches } from "./buyer/policy";
 import { buyer } from "./buyer/routes";
 import { directory, directorySource, labelOf, resolveService, scanProgress } from "./ens";
 import { registerReceiptHooks } from "./market/receipts";
 import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
-import { registerSeller, sellersByOwner, sellersList } from "./sellers";
+import { registerSeller, RegistrationRateLimit, sellersByOwner, sellersList } from "./sellers";
 import { ActivationRequestSchema, EvmAddressSchema, PurchaseIntentSchema, SellerRegistrationSchema, WorldRpRequestSchema, WorldVerificationSchema } from "./types";
 import { attestationLookup, getAttestation, signedWorldRequest, verifyAndAttest, verifyAttestation, worldConfig } from "./world";
 
@@ -45,7 +45,8 @@ app.get("/directory", async (c) => {
 app.post("/policy/activate", async (c) => {
   try {
     const { policy, expiry, signature, signer } = ActivationRequestSchema.parse(await c.req.json());
-    return c.json(describeActivation(await activatePolicy({ policy, expiry, signature, signer })));
+    const entry = await activatePolicy({ policy, expiry, signature, signer });
+    return c.json({ ...describeActivation(entry), runToken: entry.runToken });
   } catch (err) {
     return c.json({ error: message(err) }, 400);
   }
@@ -56,10 +57,14 @@ app.get("/policy/:hash", (c) => {
   return entry ? c.json(describeActivation(entry)) : c.json({ error: "no active policy with that hash" }, 404);
 });
 
+const IntentRequestSchema = PurchaseIntentSchema.extend(z.object({ token: z.string().min(1).optional() }).shape);
+
 app.post("/intent", async (c) => {
   try {
-    const intent = PurchaseIntentSchema.parse(await c.req.json());
-    if (!getActivePolicy(intent.policyHash)) return c.json({ error: "no active policy with that hash" }, 404);
+    const { token, ...intent } = IntentRequestSchema.parse(await c.req.json());
+    const entry = getActivePolicy(intent.policyHash);
+    if (!entry) return c.json({ error: "no active policy with that hash" }, 404);
+    if (!runTokenMatches(entry, token)) return c.json({ error: "run token required" }, 403);
     return c.json(await executeIntent(intent));
   } catch (err) {
     return c.json({ error: message(err) }, 400);
@@ -70,6 +75,8 @@ app.get("/run", (c) => {
   const task = c.req.query("task") ?? "";
   const policyHash = c.req.query("policyHash") ?? "";
   if (!task || !policyHash) return c.json({ error: "task and policyHash query params required" }, 400);
+  const entry = getActivePolicy(policyHash);
+  if (!entry || !runTokenMatches(entry, c.req.query("token"))) return c.json({ error: "run token required" }, 403);
   return streamSSE(c, async (stream) => {
     const send = (ev: AgentEvent) => stream.writeSSE({ event: ev.stage, data: JSON.stringify(ev) });
     try {
@@ -124,13 +131,13 @@ app.post("/sellers/register", async (c) => {
   try {
     return c.json(await registerSeller(SellerRegistrationSchema.parse(await c.req.json())));
   } catch (err) {
-    return c.json({ error: message(err) }, 400);
+    return c.json({ error: message(err) }, err instanceof RegistrationRateLimit ? 429 : 400);
   }
 });
 
 app.post("/world/rp-signature", async (c) => {
   try {
-    return c.json(signedWorldRequest(WorldRpRequestSchema.parse(await c.req.json())));
+    return c.json(await signedWorldRequest(WorldRpRequestSchema.parse(await c.req.json())));
   } catch (err) {
     return c.json({ error: message(err) }, 400);
   }
@@ -138,8 +145,8 @@ app.post("/world/rp-signature", async (c) => {
 
 app.post("/world/verify", async (c) => {
   try {
-    const { label, wallet, idkitResponse } = WorldVerificationSchema.parse(await c.req.json());
-    return c.json(await verifyAndAttest({ label, wallet, idkitResponse }));
+    const { label, wallet, signature, idkitResponse } = WorldVerificationSchema.parse(await c.req.json());
+    return c.json(await verifyAndAttest({ label, wallet, signature, idkitResponse }));
   } catch (err) {
     return c.json({ error: message(err) }, 400);
   }

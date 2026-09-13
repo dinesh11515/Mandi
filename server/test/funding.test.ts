@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { depositsIn, spentIn, type MirrorTransaction } from "../src/buyer/funding";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { depositsIn, forgetFunding, fundingFor, recordSpend, spentIn, type MirrorTransaction } from "../src/buyer/funding";
 import type { HcsMessage } from "../src/hedera";
 
 const EXECUTOR = "0.0.10454930";
@@ -113,5 +113,81 @@ describe("spentIn", () => {
 
   it("is zero for a signer with no decisions", () => {
     expect(spentIn([decision({})], "0x0000000000000000000000000000000000000003")).toBe(0);
+  });
+});
+
+const SIGNER_EVM = "0x1111111111111111111111111111111111111111";
+
+const senderPage = (transactions: MirrorTransaction[], next: string | null) => ({ transactions, links: { next } });
+
+const transfer = (id: string, tinybar: number, to = EXECUTOR): MirrorTransaction => ({
+  consensus_timestamp: `17892674${id}.000000000`,
+  name: "CRYPTOTRANSFER",
+  result: "SUCCESS",
+  transaction_id: `${SENDER}-17892674${id}-000000000`,
+  transfers: [
+    { account: SENDER, amount: -tinybar },
+    { account: to, amount: tinybar },
+  ],
+});
+
+describe("depositsIn over the sender's own pages", () => {
+  it("keeps the deposits on every page and ignores the sender's other spending", () => {
+    const pages = [
+      [transfer("01", 4000000), transfer("02", 1000000, OTHER)],
+      [transfer("03", 50000000), transfer("04", 2000000, OTHER)],
+    ];
+    const deposits = pages.flatMap((transactions) => depositsIn(transactions, EXECUTOR, SENDER));
+    expect(deposits.map((d) => d.amountHbar)).toEqual([0.04, 0.5]);
+  });
+});
+
+describe("fundingFor", () => {
+  const urls: string[] = [];
+
+  beforeAll(() => {
+    process.env.BUYER_ACCOUNT_ID = EXECUTOR;
+    vi.stubGlobal("fetch", async (input: string) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes(`/accounts/${SIGNER_EVM}`)) return Response.json({ account: SENDER });
+      if (url.includes("page=2")) return Response.json(senderPage([transfer("03", 50000000)], null));
+      if (url.includes("/transactions")) {
+        return Response.json(senderPage([transfer("01", 4000000), transfer("02", 1000000, OTHER)], "/api/v1/transactions?page=2"));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+  });
+
+  afterEach(() => {
+    forgetFunding();
+    urls.length = 0;
+  });
+
+  it("pages the sender's transactions, not the executor's history", async () => {
+    const funding = await fundingFor(SIGNER_EVM);
+    expect(urls.some((u) => u.includes(`/transactions?account.id=${SENDER}`))).toBe(true);
+    expect(urls.some((u) => u.includes(`/transactions?account.id=${EXECUTOR}`))).toBe(false);
+    expect(funding.account).toBe(SENDER);
+    expect(funding.deposits.map((d) => d.amountHbar)).toEqual([0.04, 0.5]);
+    expect(funding).toMatchObject({ depositedHbar: 0.54, spentHbar: 0, availableHbar: 0.54 });
+  });
+
+  it("never lets recordSpend lower the spent floor", async () => {
+    const funding = await fundingFor(SIGNER_EVM);
+    recordSpend(SIGNER_EVM, 0.05);
+    expect(funding.spentHbar).toBe(0.05);
+    expect(funding.availableHbar).toBe(0.49);
+    funding.spentHbar = 0;
+    recordSpend(SIGNER_EVM, 0.04);
+    expect(funding.spentHbar).toBe(0.09);
+    expect(funding.availableHbar).toBe(0.45);
+  });
+
+  it("carries the floor into a re-read while the mirror node lags", async () => {
+    await fundingFor(SIGNER_EVM);
+    recordSpend(SIGNER_EVM, 0.05);
+    forgetFunding(SIGNER_EVM);
+    expect(await fundingFor(SIGNER_EVM)).toMatchObject({ spentHbar: 0.05, availableHbar: 0.49 });
   });
 });

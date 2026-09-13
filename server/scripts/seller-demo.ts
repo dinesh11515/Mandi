@@ -1,7 +1,7 @@
 import type { Hex } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { sellerRegistrationMessage } from "../src/sellers";
-import { config } from "../src/config";
+import { CAPABILITY, config } from "../src/config";
 
 const api = process.env.MANDI_API || config.publicUrl;
 const [label, payTo, priceArg, upstream = ""] = process.argv.slice(2);
@@ -14,7 +14,7 @@ async function main() {
   const key = (process.env.DEMO_SELLER_KEY as Hex | undefined) ?? generatePrivateKey();
   const account = privateKeyToAccount(key);
   console.log(`seller wallet ${account.address}${process.env.DEMO_SELLER_KEY ? "" : ` (new key, reuse with DEMO_SELLER_KEY=${key})`}`);
-  const capability = "financial-risk";
+  const capability = CAPABILITY;
   const message = sellerRegistrationMessage({ label, owner: account.address, payTo, priceHbar, capability });
   const signature = await account.signMessage({ message });
   const res = await fetch(`${api}/sellers/register`, {

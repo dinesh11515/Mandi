@@ -26,6 +26,7 @@ export type SupplierRow = { name: string; card: ServiceCard; reliability: Reliab
 
 export type Activation = {
   policyHash: string;
+  runToken: string;
   signer: string;
   expiry: number;
   anchored: boolean;
@@ -144,8 +145,10 @@ export async function activate(body: { policy: Policy; expiry: number; signature
   );
 }
 
-export async function loadActivation(hash: string): Promise<Activation> {
-  return json<Activation>(await fetch(`${API}/policy/${hash}`));
+export type ActivationView = Omit<Activation, "runToken">;
+
+export async function loadActivation(hash: string): Promise<ActivationView> {
+  return json<ActivationView>(await fetch(`${API}/policy/${hash}`));
 }
 
 export async function loadExecutor(): Promise<Executor | null> {
@@ -158,10 +161,15 @@ export async function loadFunding(signer: string): Promise<Funding | null> {
 
 export const STAGES = ["discovery", "resolution", "preference", "authorization", "payment", "receipt", "done"] as const;
 
-export function stream(task: string, policyHash: string, onEvent: (ev: AgentEvent) => void, onEnd: (error: string | null) => void): () => void {
-  const url = `${API}/run?task=${encodeURIComponent(task)}&policyHash=${encodeURIComponent(policyHash)}`;
-  const es = new EventSource(url);
+export const runUrl = (task: string, policyHash: string, token: string) =>
+  `${API}/run?task=${encodeURIComponent(task)}&policyHash=${encodeURIComponent(policyHash)}&token=${encodeURIComponent(token)}`;
+
+export const STREAM_REJECTED = "the stream closed before the first event: the run token was refused or the executor is offline; sign and activate the policy again to get a fresh token";
+
+export function stream(task: string, policyHash: string, token: string, onEvent: (ev: AgentEvent) => void, onEnd: (error: string | null) => void): () => void {
+  const es = new EventSource(runUrl(task, policyHash, token));
   let closed = false;
+  let delivered = 0;
   const finish = (error: string | null) => {
     if (closed) return;
     closed = true;
@@ -170,11 +178,13 @@ export function stream(task: string, policyHash: string, onEvent: (ev: AgentEven
   };
   for (const stage of STAGES) {
     es.addEventListener(stage, (e) => {
+      delivered += 1;
       onEvent(JSON.parse((e as MessageEvent).data) as AgentEvent);
       if (stage === "done") finish(null);
     });
   }
-  es.onerror = () => finish("lost the agent stream before it finished; the executor may be offline or the policy no longer active");
+  es.onerror = () =>
+    finish(delivered === 0 ? STREAM_REJECTED : "lost the agent stream before it finished; the executor may be offline or the policy no longer active");
   return () => {
     closed = true;
     es.close();

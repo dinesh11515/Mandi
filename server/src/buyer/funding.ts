@@ -103,7 +103,7 @@ export function depositsIn(transactions: MirrorTransaction[], executor: string, 
 export async function depositsFrom(sender: string): Promise<Deposit[]> {
   const executor = executorAccountId();
   const deposits: Deposit[] = [];
-  let path: string | null = `/api/v1/transactions?account.id=${executor}&limit=100&order=desc`;
+  let path: string | null = `/api/v1/transactions?account.id=${sender}&limit=100&order=desc`;
   for (let page = 0; page < PAGE_CAP && path; page += 1) {
     const body: TransactionPage | null = await mirrorJson<TransactionPage>(path);
     if (!body) break;
@@ -135,7 +135,7 @@ const floors = new Map<string, number>();
 export function recordSpend(signer: string, hbar: number): void {
   const key = signer.toLowerCase();
   const entry = cache.get(key);
-  const next = round((entry?.value.spentHbar ?? floors.get(key) ?? 0) + hbar);
+  const next = round(Math.max(entry?.value.spentHbar ?? 0, floors.get(key) ?? 0) + hbar);
   floors.set(key, next);
   if (entry) {
     entry.value.spentHbar = next;

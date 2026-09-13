@@ -26,6 +26,7 @@ function active(policy: Policy): ActivePolicy {
     policyHash: "b".repeat(64),
     signer: "0x0000000000000000000000000000000000000001",
     signature: "0x00",
+    runToken: "f".repeat(64),
     expiry: Math.floor(Date.now() / 1000) + 3600,
     activatedAt: Date.now(),
     hcsTx: null,

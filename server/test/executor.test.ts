@@ -1,6 +1,8 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { acceptFilter, decide, type DecisionContext } from "../src/buyer/executor";
-import { SAMPLE_POLICY, type ServiceCard } from "../src/types";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { acceptFilter, decide, executeIntent, lookups, type DecisionContext, type Payment } from "../src/buyer/executor";
+import { activatePolicy, forgetPolicies, mandateMessage, policyHash } from "../src/buyer/policy";
+import { SAMPLE_POLICY, type Policy, type ServiceCard } from "../src/types";
 
 const card: ServiceCard = {
   name: "risk-pro.mandi.eth",
@@ -137,5 +139,74 @@ describe("acceptFilter", () => {
   it("keeps every HBAR requirement when the cap is infinite", () => {
     const kept = acceptFilter(Number.POSITIVE_INFINITY)([req("5000000"), req("99999999999")]);
     expect(kept).toHaveLength(2);
+  });
+});
+
+describe("executeIntent", () => {
+  const policy: Policy = { ...SAMPLE_POLICY, requireVerifiedFor: [], budgetTotal: "1 HBAR" };
+
+  async function activate() {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const expiry = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+    const signature = await account.signMessage({ message: mandateMessage(policyHash(policy), expiry) });
+    return activatePolicy({ policy, expiry, signature, signer: account.address });
+  }
+
+  const payment = (settled: boolean): Payment => ({
+    settled,
+    fulfilled: settled,
+    txId: settled ? "0.0.1@1" : null,
+    hashscan: null,
+    payer: "0.0.1",
+    status: settled ? 200 : 402,
+    latencyMs: 1,
+    body: null,
+    error: null,
+  });
+
+  afterEach(() => {
+    forgetPolicies();
+    lookups.funding = async () => null;
+    lookups.resolve = async () => {
+      throw new Error("not stubbed");
+    };
+    lookups.pay = async () => payment(false);
+  });
+
+  it("serializes two concurrent runs for the same signer so one deposit is spent once", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const entry = await activate();
+    const deposited = 0.05;
+    let spent = 0;
+    let inFlight = 0;
+    let overlapped = false;
+    lookups.resolve = async () => card;
+    lookups.funding = async () => {
+      inFlight += 1;
+      overlapped ||= inFlight > 1;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      inFlight -= 1;
+      return { depositedHbar: deposited, spentHbar: spent, availableHbar: Math.round((deposited - spent) * 1e8) / 1e8 };
+    };
+    lookups.pay = async (active, decision) => {
+      spent = Math.round((spent + decision.priceHbar) * 1e8) / 1e8;
+      active.ledger.spentHbar = spent;
+      active.ledger.calls += 1;
+      return payment(true);
+    };
+    const intent = { supplier: card.name, route: "/assess", protocol: "aave", policyHash: entry.policyHash } as const;
+    const outcomes = await Promise.all([executeIntent({ ...intent }), executeIntent({ ...intent })]);
+    expect(overlapped).toBe(false);
+    expect(outcomes.map((o) => o.decision.status)).toEqual(["approved", "rejected"]);
+    expect(outcomes.filter((o) => o.payment?.settled).length).toBe(1);
+    expect(outcomes[1]!.decision.reasons[0]).toContain("0 HBAR available");
+    expect(entry.ledger).toEqual({ spentHbar: 0.05, calls: 1 });
+    vi.restoreAllMocks();
+  });
+
+  it("refuses an intent for a policy that is not active", async () => {
+    await expect(
+      executeIntent({ supplier: card.name, route: "/assess", protocol: "aave", policyHash: "c".repeat(64) }),
+    ).rejects.toThrow("no active policy");
   });
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { createWalletClient, custom, parseEther, type Address, type Chain, type EIP1193Provider, type Hex } from "viem";
+import { createWalletClient, custom, parseUnits, type Address, type Chain, type EIP1193Provider, type Hex } from "viem";
 import { hederaTestnet, sepolia } from "viem/chains";
 
 export { hederaTestnet, sepolia };
@@ -97,17 +97,29 @@ export function useWallet(): Wallet {
 
   const ensureChain = useCallback(
     async (chain: Chain) => {
+      const eth = provider();
+      if (!eth) throw new Error("no browser wallet found; install MetaMask");
       if (!address) throw new Error("connect a wallet first");
       const wallet = client(chain, address);
-      const current = await wallet.getChainId();
-      if (current === chain.id) return;
-      try {
-        await wallet.switchChain({ id: chain.id });
-      } catch (err) {
-        if ((err as { code?: number }).code !== 4902 && !/unrecognized|not added|4902/i.test(describe(err))) throw new Error(describe(err));
-        await wallet.addChain({ chain });
+      const chainNow = async () => Number(await eth.request({ method: "eth_chainId" }));
+      if ((await chainNow()) !== chain.id) {
+        try {
+          await wallet.switchChain({ id: chain.id });
+        } catch (err) {
+          if ((err as { code?: number }).code !== 4902 && !/unrecognized|not added|4902/i.test(describe(err))) throw new Error(describe(err));
+          await wallet.addChain({ chain });
+          if ((await chainNow()) !== chain.id) {
+            try {
+              await wallet.switchChain({ id: chain.id });
+            } catch (again) {
+              throw new Error(describe(again));
+            }
+          }
+        }
       }
-      setChainId(chain.id);
+      const settled = await chainNow();
+      if (settled !== chain.id) throw new Error(`the wallet is on chain ${settled}; switch it to ${chain.name} (chain ${chain.id}) and try again`);
+      setChainId(settled);
     },
     [address],
   );
@@ -129,7 +141,7 @@ export function useWallet(): Wallet {
       if (!address) throw new Error("connect a wallet first");
       await ensureChain(hederaTestnet);
       try {
-        return await client(hederaTestnet, address).sendTransaction({ to, value: parseEther(String(hbar)) });
+        return await client(hederaTestnet, address).sendTransaction({ to, value: parseUnits(hbar.toFixed(8), 18) });
       } catch (err) {
         throw new Error(describe(err));
       }

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { recoverMessageAddress, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { requireEnv } from "../config";
@@ -35,6 +35,7 @@ export type ActivePolicy = {
   policyHash: string;
   signer: Address;
   signature: Hex;
+  runToken: string;
   expiry: number;
   activatedAt: number;
   hcsTx: string | null;
@@ -43,6 +44,11 @@ export type ActivePolicy = {
 };
 
 const active = new Map<string, ActivePolicy>();
+const usedSignatures = new Set<string>();
+
+export const MANDATE_TTL = 24 * 60 * 60;
+const MANDATE_STALE_BY = 900;
+const MANDATE_AHEAD_BY = 120;
 
 export async function signMandate(hash: string, expiry: number): Promise<{ signer: Address; signature: Hex }> {
   if (!process.env.HUMAN_KEY) throw new Error("sign the mandate with a wallet: HUMAN_KEY is not configured");
@@ -61,14 +67,22 @@ export type ActivationInput = {
 export async function activatePolicy(input: ActivationInput): Promise<ActivePolicy> {
   const policy = PolicySchema.parse(input.policy);
   const hash = policyHash(policy);
-  const expiry = input.expiry ?? Math.floor(Date.now() / 1000) + 24 * 60 * 60;
-  if (expiry <= Math.floor(Date.now() / 1000)) throw new Error("policy mandate is expired");
-  const { signer, signature } =
-    input.signature && input.signer
-      ? { signer: input.signer, signature: input.signature }
-      : await signMandate(hash, expiry);
+  const { signature, signer } = input;
+  if (!signature || !signer) throw new Error("sign the mandate with a wallet");
+  const now = Math.floor(Date.now() / 1000);
+  const expiry = input.expiry ?? now + MANDATE_TTL;
+  if (expiry < now + MANDATE_TTL - MANDATE_STALE_BY) throw new Error("policy mandate is stale: sign one that expires 24 hours from now");
+  if (expiry > now + MANDATE_TTL + MANDATE_AHEAD_BY) throw new Error("policy mandate reaches too far ahead: sign one that expires 24 hours from now");
+  const used = signature.toLowerCase();
+  if (usedSignatures.has(used)) throw new Error("mandate already used");
   const recovered = await recoverMessageAddress({ message: mandateMessage(hash, expiry), signature });
   if (recovered.toLowerCase() !== signer.toLowerCase()) throw new Error("policy mandate signature does not match signer");
+  usedSignatures.add(used);
+  const current = getActivePolicy(hash);
+  if (current) {
+    if (current.signer.toLowerCase() !== signer.toLowerCase()) throw new Error("that policy is already active for a different signer");
+    return current;
+  }
   let hcsTx: string | null = null;
   let anchorError: string | null = null;
   try {
@@ -81,6 +95,7 @@ export async function activatePolicy(input: ActivationInput): Promise<ActivePoli
     policyHash: hash,
     signer,
     signature,
+    runToken: randomBytes(32).toString("hex"),
     expiry,
     activatedAt: Date.now(),
     hcsTx,
@@ -98,11 +113,20 @@ export function getActivePolicy(hash: string): ActivePolicy | undefined {
   return entry;
 }
 
+export function runTokenMatches(entry: ActivePolicy, token: unknown): boolean {
+  if (typeof token !== "string" || token.length !== entry.runToken.length) return false;
+  return timingSafeEqual(Buffer.from(token), Buffer.from(entry.runToken));
+}
+
+export function forgetPolicies(): void {
+  active.clear();
+  usedSignatures.clear();
+}
+
 export function describeActivation(entry: ActivePolicy) {
   return {
     policyHash: entry.policyHash,
     signer: entry.signer,
-    signature: entry.signature,
     expiry: entry.expiry,
     activatedAt: entry.activatedAt,
     anchored: entry.hcsTx !== null,

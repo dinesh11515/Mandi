@@ -10,6 +10,8 @@ import {
   message,
   registerSeller,
   rpSignature,
+  selfieCheckMessage,
+  SELLER_LABEL_PATTERN,
   sellerRegistrationMessage,
   verifySelfie,
   type SellerRow,
@@ -22,7 +24,6 @@ import { shortAddress, useWallet } from "./wallet";
 
 const DEFAULT_PRICE = "0.03";
 const DEFAULT_CAPABILITY = "financial-risk";
-const LABEL_PATTERN = /^[a-z0-9-]{1,16}$/;
 const ACCOUNT_PATTERN = /^0\.0\.\d+$/;
 const PHASES = ["waiting for signature", "minting on Sepolia", "writing records"];
 
@@ -71,6 +72,7 @@ export function Seller() {
   const [registered, setRegistered] = useState<RegisterResult | null>(null);
   const [ready, setReady] = useState<string | null>(null);
 
+  const [proof, setProof] = useState<{ label: string; owner: string; signature: string } | null>(null);
   const [rp, setRp] = useState<RpContext | null>(null);
   const [action, setAction] = useState("");
   const [open, setOpen] = useState(false);
@@ -78,6 +80,13 @@ export function Seller() {
 
   const selfieRef = useRef<HTMLElement | null>(null);
   const preselected = useRef(false);
+  const live = useRef(wallet);
+
+  useEffect(() => {
+    live.current = wallet;
+  });
+
+  const ownerNow = () => live.current.address?.toLowerCase() ?? null;
 
   useEffect(() => {
     let alive = true;
@@ -125,6 +134,7 @@ export function Seller() {
     setContext(row.context);
     setRegistered(null);
     setResult(null);
+    setProof(null);
     setRp(null);
     setOpen(false);
     setError(null);
@@ -143,8 +153,8 @@ export function Seller() {
   const parent = config?.parent ?? "";
   const name = label && parent ? `${label}.${parent}` : "";
   const priceHbar = Number(price);
-  const problem = !LABEL_PATTERN.test(label)
-    ? "name is 1–16 characters: lowercase letters, digits and hyphens"
+  const problem = !SELLER_LABEL_PATTERN.test(label)
+    ? "name is 1–16 characters: lowercase letters, digits and inner hyphens, no leading or trailing hyphen"
     : !Number.isFinite(priceHbar) || priceHbar <= 0
       ? "price per call must be a positive number of HBAR"
       : !ACCOUNT_PATTERN.test(payTo.trim())
@@ -158,10 +168,12 @@ export function Seller() {
               : null;
 
   const register = async () => {
-    if (!address || problem) return;
+    const owner = ownerNow();
+    if (!owner || problem) return;
     setError(null);
     setRegistered(null);
     setResult(null);
+    setProof(null);
     setRp(null);
     setOpen(false);
     setBusy("register");
@@ -169,11 +181,16 @@ export function Seller() {
     const account = payTo.trim();
     const cap = capability.trim();
     try {
-      const signature = await wallet.signMessage(sellerRegistrationMessage({ name, owner: address, payTo: account, priceHbar, capability: cap }));
+      const signature = await live.current.signMessage(sellerRegistrationMessage({ name, owner, payTo: account, priceHbar, capability: cap }));
+      const stillOwner = ownerNow();
+      if (stillOwner !== owner) {
+        setError(`the connected wallet changed from ${owner} to ${stillOwner ?? "none"} after you signed; connect that wallet again and sign a fresh registration`);
+        return;
+      }
       setPhase(1);
       const body = await registerSeller({
         label,
-        owner: address,
+        owner,
         signature,
         payTo: account,
         priceHbar,
@@ -192,13 +209,21 @@ export function Seller() {
   };
 
   const startSelfie = async () => {
-    if (!address || !ready) return;
+    const owner = ownerNow();
+    if (!owner || !ready || !parent) return;
     setError(null);
     setBusy("selfie");
     try {
-      const signed = await rpSignature(ready, address);
+      const signature = await live.current.signMessage(selfieCheckMessage({ label: ready, parent, owner }));
+      const stillOwner = ownerNow();
+      if (stillOwner !== owner) {
+        setError(`the connected wallet changed from ${owner} to ${stillOwner ?? "none"} after you signed; connect that wallet again and start Selfie Check afresh`);
+        return;
+      }
+      const signed = await rpSignature(ready, owner, signature);
       if (!signed.rp_context) throw new Error("rp-signature response is missing rp_context");
       if (signed.action) setAction(signed.action);
+      setProof({ label: ready, owner, signature });
       setRp(signed.rp_context);
       setOpen(true);
     } catch (err) {
@@ -209,9 +234,11 @@ export function Seller() {
   };
 
   const handleVerify = async (idkitResponse: IDKitResult) => {
-    if (!address || !ready) throw new Error("connect a wallet and pick a listed name first");
+    const owner = ownerNow();
+    if (!owner || !ready) throw new Error("connect a wallet and pick a listed name first");
+    if (!proof || proof.owner !== owner || proof.label !== ready) throw new Error("the connected wallet or the name changed; start Selfie Check again from this wallet");
     try {
-      setResult(await verifySelfie(ready, address, idkitResponse));
+      setResult(await verifySelfie(ready, owner, proof.signature, idkitResponse));
     } catch (err) {
       setError(message(err));
       throw err instanceof Error ? err : new Error(message(err));

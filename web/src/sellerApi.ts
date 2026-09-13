@@ -87,11 +87,18 @@ export function sellerRegistrationMessage(input: { name: string; owner: string; 
   ].join("\n");
 }
 
+export function selfieCheckMessage(input: { label: string; parent: string; owner: string }): string {
+  return ["Mandi Selfie Check", `name: ${input.label}.${input.parent}`, `owner: ${input.owner.toLowerCase()}`].join("\n");
+}
+
+export const SELLER_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,14}[a-z0-9])?$/;
+
 export const registerSeller = (body: RegisterBody): Promise<RegisterResult> => post<RegisterResult>("/sellers/register", body);
 
-export const rpSignature = (label: string, wallet: string): Promise<RpSignature> => post<RpSignature>("/world/rp-signature", { label, wallet });
+export const rpSignature = (label: string, wallet: string, signature: string): Promise<RpSignature> =>
+  post<RpSignature>("/world/rp-signature", { label, wallet, signature });
 
-export const verifySelfie = (label: string, wallet: string, idkitResponse: IDKitResult): Promise<VerifyResult> =>
-  post<VerifyResult>("/world/verify", { label, wallet, idkitResponse });
+export const verifySelfie = (label: string, wallet: string, signature: string, idkitResponse: IDKitResult): Promise<VerifyResult> =>
+  post<VerifyResult>("/world/verify", { label, wallet, signature, idkitResponse });
 
 export const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));

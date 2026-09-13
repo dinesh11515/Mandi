@@ -95,11 +95,10 @@ export type SellerRegistration = z.infer<typeof SellerRegistrationSchema>;
 export const WorldRpRequestSchema = z.object({
   label: z.string().min(1),
   wallet: EvmAddressSchema,
+  signature: HexSchema,
 });
 
-export const WorldVerificationSchema = z.object({
-  label: z.string().min(1),
-  wallet: EvmAddressSchema,
+export const WorldVerificationSchema = WorldRpRequestSchema.extend({
   idkitResponse: z.unknown(),
 });
 

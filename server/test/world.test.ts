@@ -15,9 +15,14 @@ process.env.SELLER_EVM_ADDRESS = seller.address;
 
 const { attestationLookup, attestationMessage, getAttestation, issueAttestation, signedWorldRequest, verifyAndAttest, verifyAttestation, worldConfig } =
   await import("../src/world");
+const { selfieCheckMessage } = await import("../src/sellers");
 
 const wallet = seller.address;
-const stranger = privateKeyToAccount(generatePrivateKey()).address;
+const strangerAccount = privateKeyToAccount(generatePrivateKey());
+const stranger = strangerAccount.address;
+
+const selfieCheck = (label: string, account: typeof seller, owner = account.address) =>
+  account.signMessage({ message: selfieCheckMessage({ label, owner }) });
 
 function fakeFetch(body: unknown, ok = true): typeof fetch {
   return (async () => new Response(JSON.stringify(body), { status: ok ? 200 : 400 })) as unknown as typeof fetch;
@@ -61,7 +66,7 @@ describe("verifyAndAttest", () => {
 
   it("issues an attestation when World confirms the proof and the signal matches the wallet", async () => {
     const result = await verifyAndAttest(
-      { label: "risk-pro-2", wallet, idkitResponse: proof(wallet, "0xnull-1") },
+      { label: "risk-pro-2", wallet, signature: await selfieCheck("risk-pro-2", seller), idkitResponse: proof(wallet, "0xnull-1") },
       { fetch: fakeFetch({ success: true, action: "mandi-supplier-accreditation", nullifier: "0xnull-1" }) },
     );
     expect(result.attestation.name).toBe("risk-pro-2.mandi.eth");
@@ -73,7 +78,7 @@ describe("verifyAndAttest", () => {
   it("rejects a proof whose signal is not the seller wallet", async () => {
     await expect(
       verifyAndAttest(
-        { label: "risk-basic", wallet, idkitResponse: proof("0x0000000000000000000000000000000000000001", "0xnull-2") },
+        { label: "risk-basic", wallet, signature: await selfieCheck("risk-basic", seller), idkitResponse: proof("0x0000000000000000000000000000000000000001", "0xnull-2") },
         { fetch: fakeFetch({ success: true, nullifier: "0xnull-2" }) },
       ),
     ).rejects.toThrow("signal does not match");
@@ -84,7 +89,8 @@ describe("verifyAndAttest", () => {
       ...proof(wallet, "0xnull-orb"),
       responses: [{ identifier: "orb", signal_hash: hashSignal(wallet), proof: "0x00", merkle_root: "0x01", nullifier: "0xnull-orb" }],
     };
-    await expect(verifyAndAttest({ label: "risk-basic", wallet, idkitResponse: orb }, { fetch: fakeFetch({ success: true, nullifier: "0xnull-orb" }) })).rejects.toThrow(
+    const signature = await selfieCheck("risk-basic", seller);
+    await expect(verifyAndAttest({ label: "risk-basic", wallet, signature, idkitResponse: orb }, { fetch: fakeFetch({ success: true, nullifier: "0xnull-orb" }) })).rejects.toThrow(
       "expected a selfie credential",
     );
   });
@@ -94,9 +100,31 @@ describe("verifyAndAttest", () => {
       throw new Error("World must not be called");
     }) as unknown as typeof fetch;
     await expect(
-      verifyAndAttest({ label: "risk-basic", wallet: stranger, idkitResponse: proof(stranger, "0xnull-4") }, { fetch: exploding }),
+      verifyAndAttest(
+        { label: "risk-basic", wallet: stranger, signature: await selfieCheck("risk-basic", strangerAccount), idkitResponse: proof(stranger, "0xnull-4") },
+        { fetch: exploding },
+      ),
     ).rejects.toThrow(`${stranger} does not own risk-basic.mandi.eth`);
-    expect(() => signedWorldRequest({ label: "risk-basic", wallet: stranger })).toThrow("does not own");
+    await expect(
+      signedWorldRequest({ label: "risk-basic", wallet: stranger, signature: await selfieCheck("risk-basic", strangerAccount) }),
+    ).rejects.toThrow("does not own");
+  });
+
+  it("rejects a Selfie Check signature that does not recover the owner wallet, without calling World", async () => {
+    const exploding = (() => {
+      throw new Error("World must not be called");
+    }) as unknown as typeof fetch;
+    const forged = await selfieCheck("risk-basic", strangerAccount, wallet);
+    await expect(
+      verifyAndAttest({ label: "risk-basic", wallet, signature: forged, idkitResponse: proof(wallet, "0xnull-5") }, { fetch: exploding }),
+    ).rejects.toThrow(`signature does not recover ${wallet}`);
+    await expect(signedWorldRequest({ label: "risk-basic", wallet, signature: forged })).rejects.toThrow(`signature does not recover ${wallet}`);
+  });
+
+  it("rejects a Selfie Check signature taken over another name", async () => {
+    await expect(
+      signedWorldRequest({ label: "risk-basic", wallet, signature: await selfieCheck("risk-pro", seller) }),
+    ).rejects.toThrow("signature does not recover");
   });
 
   it("advertises the parent name and explorer without a wallet", () => {
@@ -109,10 +137,16 @@ describe("verifyAndAttest", () => {
 
   it("rejects a World failure and a nullifier already bound to another name", async () => {
     await expect(
-      verifyAndAttest({ label: "risk-basic", wallet, idkitResponse: proof(wallet, "0xnull-3") }, { fetch: fakeFetch({ success: false, code: "all_verifications_failed" }, false) }),
+      verifyAndAttest(
+        { label: "risk-basic", wallet, signature: await selfieCheck("risk-basic", seller), idkitResponse: proof(wallet, "0xnull-3") },
+        { fetch: fakeFetch({ success: false, code: "all_verifications_failed" }, false) },
+      ),
     ).rejects.toThrow("World verify failed: all_verifications_failed");
     await expect(
-      verifyAndAttest({ label: "risk-basic", wallet, idkitResponse: proof(wallet, "0xnull-1") }, { fetch: fakeFetch({ success: true, nullifier: "0xnull-1" }) }),
+      verifyAndAttest(
+        { label: "risk-basic", wallet, signature: await selfieCheck("risk-basic", seller), idkitResponse: proof(wallet, "0xnull-1") },
+        { fetch: fakeFetch({ success: true, nullifier: "0xnull-1" }) },
+      ),
     ).rejects.toThrow("already accredits risk-pro-2.mandi.eth");
   });
 });

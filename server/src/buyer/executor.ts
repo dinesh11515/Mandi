@@ -272,18 +272,22 @@ export type Lookups = {
   reliability: (name: string) => Promise<Reliability | null>;
   attestation: (name: string) => Promise<Attestation | null>;
   funding: (signer: string) => Promise<FundingSnapshot | null>;
+  resolve: (name: string) => Promise<ServiceCard>;
+  pay: (active: ActivePolicy, decision: Decision, card: ServiceCard, protocol: string) => Promise<Payment>;
 };
 
 export const lookups: Lookups = {
   reliability: async () => null,
   attestation: async () => null,
   funding: async () => null,
+  resolve: resolveService,
+  pay,
 };
 
 export async function evaluateIntent(intent: PurchaseIntent): Promise<{ active: ActivePolicy; card: ServiceCard; decision: Decision }> {
   const active = getActivePolicy(intent.policyHash);
   if (!active) throw new Error(`no active policy ${intent.policyHash}`);
-  const card = await resolveService(intent.supplier);
+  const card = await lookups.resolve(intent.supplier);
   const [reliability, attestation, funding] = await Promise.all([
     lookups.reliability(card.name),
     lookups.attestation(card.name),
@@ -302,13 +306,30 @@ export async function evaluateIntent(intent: PurchaseIntent): Promise<{ active: 
   return { active, card, decision };
 }
 
-export async function executeIntent(intent: PurchaseIntent): Promise<IntentOutcome> {
+const queues = new Map<string, Promise<unknown>>();
+
+function serialize<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const next = (queues.get(key) ?? Promise.resolve()).then(task, task);
+  queues.set(
+    key,
+    next.catch(() => undefined),
+  );
+  return next;
+}
+
+async function settleIntent(intent: PurchaseIntent): Promise<IntentOutcome> {
   const { active, card, decision } = await evaluateIntent(intent);
   if (decision.status !== "approved") {
     const hcsTx = await anchorDecision(active, decision, null);
     return { decision, payment: null, hcsTx, ledger: active.ledger };
   }
-  const payment = await pay(active, decision, card, intent.protocol);
+  const payment = await lookups.pay(active, decision, card, intent.protocol);
   const hcsTx = await anchorDecision(active, decision, payment.txId);
   return { decision, payment, hcsTx, ledger: active.ledger };
+}
+
+export async function executeIntent(intent: PurchaseIntent): Promise<IntentOutcome> {
+  const active = getActivePolicy(intent.policyHash);
+  if (!active) throw new Error(`no active policy ${intent.policyHash}`);
+  return serialize(active.signer.toLowerCase(), () => settleIntent(intent));
 }

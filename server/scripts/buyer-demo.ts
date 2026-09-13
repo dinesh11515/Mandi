@@ -62,14 +62,16 @@ async function main() {
   const hash256 = policyHash(policy);
   const expiry = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
   const signature = await account.signMessage({ message: mandateMessage(hash256, expiry) });
-  const activation = await json<{ policyHash: string; hashscan: string | null; signer: string }>("/policy/activate", {
+  const activation = await json<{ policyHash: string; hashscan: string | null; signer: string; runToken: string }>("/policy/activate", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ policy, expiry, signature, signer: account.address }),
   });
   console.log(`policy ${activation.policyHash} signed by ${activation.signer}; anchored ${activation.hashscan ?? "no"}`);
 
-  const res = await fetch(`${api}/run?task=${encodeURIComponent(task)}&policyHash=${activation.policyHash}`);
+  const res = await fetch(
+    `${api}/run?task=${encodeURIComponent(task)}&policyHash=${activation.policyHash}&token=${activation.runToken}`,
+  );
   if (!res.ok || !res.body) throw new Error(`/run ${res.status}`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

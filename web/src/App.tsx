@@ -49,6 +49,13 @@ const stamp = (ts: string | number) => {
   return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toLocaleString() : String(ts);
 };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const depositProblem = (raw: string): string | null => {
+  const value = Number(raw.trim());
+  if (raw.trim() === "" || !Number.isFinite(value)) return "the deposit amount has to be a number of HBAR";
+  if (value < 0.01) return "deposit at least 0.01 HBAR";
+  if (Number(value.toFixed(8)) !== value) return "HBAR carries at most 8 decimals, which is what the transfer sends";
+  return null;
+};
 
 function Copy({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -181,6 +188,7 @@ function Suppliers({ rows, loading, error, onRefresh }: { rows: SupplierRow[]; l
 
 function FundingCard({ wallet, refreshToken }: { wallet: Wallet; refreshToken: number }) {
   const address = wallet.address;
+  const live = useRef(wallet);
   const [executor, setExecutor] = useState<Executor | null>(null);
   const [offline, setOffline] = useState<string | null>(null);
   const [funding, setFunding] = useState<Funding | null>(null);
@@ -191,6 +199,10 @@ function FundingCard({ wallet, refreshToken }: { wallet: Wallet; refreshToken: n
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
+
+  useEffect(() => {
+    live.current = wallet;
+  });
 
   useEffect(() => {
     alive.current = true;
@@ -209,53 +221,66 @@ function FundingCard({ wallet, refreshToken }: { wallet: Wallet; refreshToken: n
       .catch((err) => alive.current && setOffline(`executor funding unavailable — ${message(err)}`));
   }, [refreshToken]);
 
-  const refreshFunding = useCallback(async () => {
-    if (!address) {
+  const refreshFunding = useCallback(async (): Promise<Funding | null> => {
+    const at = live.current.address;
+    if (!at) {
       setFunding(null);
       return null;
     }
     try {
-      const next = await loadFunding(address);
-      if (alive.current) setFunding(next);
+      const next = await loadFunding(at);
+      if (!alive.current || live.current.address !== at) return null;
+      setFunding(next);
       return next;
     } catch (err) {
-      if (alive.current) setError(message(err));
+      if (alive.current && live.current.address === at) setError(message(err));
       return null;
     }
-  }, [address]);
+  }, []);
 
   useEffect(() => {
     void refreshFunding();
-  }, [refreshFunding, refreshToken]);
+  }, [address, refreshFunding, refreshToken]);
 
   const onDeposit = async () => {
-    if (!address || !executor) return;
-    const value = Number(amount);
-    if (!Number.isFinite(value) || value < 0.01) {
-      setError("deposit at least 0.01 HBAR");
+    const at = live.current.address;
+    if (!at || !executor) return;
+    const invalid = depositProblem(amount);
+    if (invalid) {
+      setError(invalid);
       return;
     }
+    const value = Number(amount.trim());
     setError(null);
     setNote(null);
     setTxHash(null);
     setDepositing(true);
     const before = funding?.depositedHbar ?? 0;
     try {
-      const hash = await wallet.sendHbar(executor.evmAddress as Address, value);
+      const hash = await live.current.sendHbar(executor.evmAddress as Address, value);
       if (!alive.current) return;
       setTxHash(hash);
       setDepositing(false);
       setWaiting(true);
       const deadline = Date.now() + DEPOSIT_WAIT_MS;
       let credited = false;
-      while (alive.current && Date.now() < deadline && !credited) {
+      let switched = false;
+      while (alive.current && Date.now() < deadline && !credited && !switched) {
         await sleep(DEPOSIT_POLL_MS);
+        switched = live.current.address !== at;
+        if (switched) break;
         const next = await refreshFunding();
         credited = next !== null && next.depositedHbar > before + 1e-9;
       }
       if (!alive.current) return;
       setWaiting(false);
-      setNote(credited ? `credited ${hbar(value)} to your balance with the executor` : "the deposit has not appeared on the mirror node yet; refresh in a moment");
+      setNote(
+        switched
+          ? "the connected wallet changed, so the console stopped watching for this deposit; switch back to the sending wallet to see it credited"
+          : credited
+            ? `credited ${hbar(value)} to your balance with the executor`
+            : "the deposit has not appeared on the mirror node yet; refresh in a moment",
+      );
     } catch (err) {
       if (!alive.current) return;
       setDepositing(false);
@@ -266,6 +291,7 @@ function FundingCard({ wallet, refreshToken }: { wallet: Wallet; refreshToken: n
 
   const busy = depositing || waiting;
   const available = funding?.availableHbar ?? 0;
+  const amountProblem = depositProblem(amount);
 
   return (
     <section className="card">
@@ -321,13 +347,14 @@ function FundingCard({ wallet, refreshToken }: { wallet: Wallet; refreshToken: n
             amount to deposit
             <input className="text" type="number" min="0.01" step="0.1" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={!address || busy} aria-label="deposit amount in HBAR" />
           </label>
-          <button className="btn primary" onClick={() => void onDeposit()} disabled={!address || !executor || busy}>
+          <button className="btn primary" onClick={() => void onDeposit()} disabled={!address || !executor || busy || amountProblem !== null}>
             {busy ? <Spinner size={14} /> : <IconWallet size={15} />} {depositing ? "confirm in MetaMask" : waiting ? "waiting for the mirror node" : "Deposit from MetaMask"}
           </button>
           <button className="btn ghost sm" onClick={() => void refreshFunding()} disabled={!address || busy} title="refresh funding">
             <IconRefresh size={14} /> refresh
           </button>
         </div>
+        {address && amountProblem && <span className="dim">{amountProblem}</span>}
         {!address && <span className="dim">connect a wallet to deposit HBAR; MetaMask will switch to Hedera testnet (chain 296) for the transfer</span>}
         {error && (
           <div className="notice bad">
@@ -646,8 +673,18 @@ export function App() {
     }
   };
 
+  const connected = wallet.address !== null;
+  const signerMismatch = activation !== null && wallet.address !== null && activation.signer.toLowerCase() !== wallet.address.toLowerCase();
+  const runBlock = !activation
+    ? "sign and activate a policy first"
+    : !connected
+      ? "connect the wallet that signed this policy before running the task"
+      : signerMismatch
+        ? `this policy was signed by ${short(activation.signer, 6)}; switch back to that wallet or sign and activate a new policy`
+        : null;
+
   const onRun = () => {
-    if (!activation) return;
+    if (!activation || runBlock) return;
     cancelRun.current?.();
     setEvents([]);
     setRunError(null);
@@ -655,19 +692,21 @@ export function App() {
     cancelRun.current = stream(
       task,
       activation.policyHash,
+      activation.runToken,
       (ev) => setEvents((prev) => [...prev, ev]),
       (error) => {
         cancelRun.current = null;
         setRunning(false);
         setRunError(error);
-        void loadActivation(activation.policyHash).then(setActivation).catch(() => undefined);
+        void loadActivation(activation.policyHash)
+          .then((fresh) => setActivation((prev) => (prev && prev.policyHash === fresh.policyHash ? { ...fresh, runToken: prev.runToken } : prev)))
+          .catch(() => undefined);
         void refresh();
         setFundingToken((n) => n + 1);
       },
     );
   };
 
-  const connected = wallet.address !== null;
   const topicUrl = rows[0]?.reliability.source?.hashscan ?? null;
   const receipts = rows.reduce((n, r) => n + r.reliability.calls, 0);
   const budget = activation ? Number.parseFloat(activation.policy.budgetTotal) : Number.NaN;
@@ -829,11 +868,16 @@ export function App() {
                   <input className="text" type="text" value={task} onChange={(e) => setTask(e.target.value)} />
                 </label>
                 <div className="row between">
-                  <button className="btn primary" onClick={onRun} disabled={!activation || running}>
+                  <button className="btn primary" onClick={onRun} disabled={running || runBlock !== null}>
                     {running ? <Spinner size={14} /> : <IconBolt size={15} />} {running ? "running" : "Run agent"}
                   </button>
-                  {!activation && <span className="dim">sign and activate a policy first</span>}
+                  {runBlock && !signerMismatch && <span className="dim">{runBlock}</span>}
                 </div>
+                {signerMismatch && (
+                  <div className="notice bad">
+                    <IconAlert size={16} /> {runBlock}
+                  </div>
+                )}
               </div>
             </section>
           </div>

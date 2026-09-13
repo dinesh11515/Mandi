@@ -122,6 +122,17 @@ export function upsertSupplier(row: SupplierInput): Supplier {
   return next;
 }
 
+export function removeSupplier(label: string): boolean {
+  const normalized = label.trim().toLowerCase();
+  if (isConfigSupplier(normalized)) return false;
+  const extras = loadExtras();
+  const kept = extras.filter((s) => s.label !== normalized);
+  if (kept.length === extras.length) return false;
+  fs.mkdirSync(path.dirname(extrasFile()), { recursive: true });
+  fs.writeFileSync(extrasFile(), JSON.stringify(kept, null, 2));
+  return true;
+}
+
 function parseFailModes(spec: string): Record<string, string> {
   const modes: Record<string, string> = {};
   for (const entry of spec.split(",").map((s) => s.trim()).filter(Boolean)) {

@@ -60,6 +60,7 @@ export const registryAbi = parseAbi([
   "function getSubregistry(string label) view returns (address)",
   "function getResolver(string label) view returns (address)",
   "function getExpiry(uint256 anyId) view returns (uint64)",
+  "function ownerOf(uint256 id) view returns (address)",
   "function grantRoles(uint256 resource, uint256 roleBitmap, address account) returns (bool)",
   "function hasRoles(uint256 resource, uint256 roleBitmap, address account) view returns (bool)",
   "event LabelRegistered(uint256 indexed tokenId, bytes32 indexed labelHash, string label, address owner, uint64 expiry, address indexed sender)",
@@ -215,6 +216,18 @@ export function assertSupplierOwner(label: string, wallet: string): Supplier {
   if (!owner) throw new Error(`${serviceName(label)} has no owner on record; register it from the seller page first`);
   if (owner !== wallet.toLowerCase()) throw new Error(`${wallet} does not own ${serviceName(label)}`);
   return supplier;
+}
+
+export type ChainOwnership = { resolver: Address; owner: Address };
+
+export async function chainOwnership(label: string): Promise<ChainOwnership> {
+  const normalized = assertSellerLabel(label);
+  const client = publicClient();
+  const address = subregistryAddress();
+  const resolver = await client.readContract({ address, abi: registryAbi, functionName: "getResolver", args: [normalized] });
+  if (resolver === zeroAddress) return { resolver, owner: zeroAddress };
+  const owner = await client.readContract({ address, abi: registryAbi, functionName: "ownerOf", args: [canonicalIdOf(normalized)] });
+  return { resolver, owner };
 }
 
 const ONE_YEAR = 365 * 24 * 60 * 60;
@@ -426,3 +439,6 @@ export async function directory(capability?: string): Promise<string[]> {
 
 export const nodeOf = (name: string) => namehash(normalize(name));
 export const labelIdOf = (label: string) => BigInt(labelhash(label));
+
+export const TOKEN_VERSION_BITS = 32n;
+export const canonicalIdOf = (label: string) => (labelIdOf(label) >> TOKEN_VERSION_BITS) << TOKEN_VERSION_BITS;

@@ -7,7 +7,8 @@ import { privateKeyToAccount } from "viem/accounts";
 import { namehash } from "viem/ens";
 import { canonicalize, sha256 } from "./buyer/policy";
 import { allSuppliers, config, requireEnv } from "./config";
-import { assertSupplierOwner, RECORD_KEYS, serviceName, setTextRecord } from "./ens";
+import { RECORD_KEYS, serviceName, setTextRecord } from "./ens";
+import { assertSelfieCheckOwner, type SelfieCheckProof } from "./sellers";
 
 export const WORLD_ACTION = config.world.action;
 export const ATTESTATION_TTL_SECONDS = 90 * 24 * 60 * 60;
@@ -25,13 +26,13 @@ export function rpContext(): RpContext {
   };
 }
 
-export function signedWorldRequest(input: { label: string; wallet: Address }): {
+export async function signedWorldRequest(input: SelfieCheckProof): Promise<{
   rp_context: RpContext;
   action: string;
   wallet: Address;
   name: string;
-} {
-  assertSupplierOwner(input.label, input.wallet);
+}> {
+  await assertSelfieCheckOwner(input);
   return { rp_context: rpContext(), action: WORLD_ACTION, wallet: input.wallet, name: serviceName(input.label) };
 }
 
@@ -132,10 +133,10 @@ type IdkitResponse = { responses?: { identifier?: string; signal_hash?: string; 
 export type VerifyDeps = { fetch: typeof fetch };
 
 export async function verifyAndAttest(
-  input: { label: string; wallet: Address; idkitResponse: unknown },
+  input: SelfieCheckProof & { idkitResponse: unknown },
   deps: VerifyDeps = { fetch },
 ): Promise<{ attestation: AttestationRecord; ensTx: string | null; ensError: string | null }> {
-  assertSupplierOwner(input.label, input.wallet);
+  await assertSelfieCheckOwner(input);
   const name = serviceName(input.label);
   const rpId = requireEnv("WORLD_RP_ID");
   const res = await deps.fetch(`https://developer.world.org/api/v4/verify/${rpId}`, {
