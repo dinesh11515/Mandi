@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { API, ensExplorer } from "./api";
+import { API, ensExplorer, sellerHref } from "./api";
 import { IconExternal, IconShield, Logo } from "./icons";
 
 export type Health = "checking" | "ok" | "down";
@@ -44,7 +44,7 @@ export function Topbar({ topicUrl, right }: { topicUrl?: string | null; right?: 
         <a className="navlink" href={ensExplorer("mandi.eth")} target="_blank" rel="noreferrer">
           mandi.eth <IconExternal size={14} />
         </a>
-        <a className="navlink" href="/seller?name=risk-pro">
+        <a className="navlink" href={sellerHref()}>
           <IconShield size={14} /> Seller accreditation
         </a>
         <a className="navlink" href="https://github.com/dinesh11515/Mandi" target="_blank" rel="noreferrer">

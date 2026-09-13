@@ -4,6 +4,7 @@ import {
   ensExplorer,
   loadActivation,
   loadSuppliers,
+  sellerHref,
   stream,
   type Activation,
   type AgentEvent,
@@ -132,7 +133,7 @@ function Suppliers({ rows, loading, error, onRefresh }: { rows: SupplierRow[]; l
                     <div className="row">
                       <Accreditation row={r} />
                       {!r.attestation?.valid && (
-                        <a className="navlink" href={`/seller?name=${r.name.split(".")[0]}`}>
+                        <a className="navlink" href={sellerHref(r.name.split(".")[0])}>
                           accredit
                         </a>
                       )}

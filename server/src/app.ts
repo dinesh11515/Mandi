@@ -13,7 +13,7 @@ import { registerReceiptHooks } from "./market/receipts";
 import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
 import { PurchaseIntentSchema } from "./types";
-import { attestationLookup, getAttestation, signedWorldRequest, verifyAndAttest, verifyAttestation } from "./world";
+import { attestationLookup, getAttestation, signedWorldRequest, verifyAndAttest, verifyAttestation, worldConfig } from "./world";
 
 registerReceiptHooks();
 lookups.reliability = (name) => reliabilityFor(labelOf(name));
@@ -85,6 +85,14 @@ app.get("/reliability/:name", async (c) => {
     return c.json({ source: reliabilitySource(), ...(await reliabilityFor(c.req.param("name").split(".")[0]!)) });
   } catch (err) {
     return c.json({ error: message(err) }, 503);
+  }
+});
+
+app.get("/world/config", (c) => {
+  try {
+    return c.json(worldConfig());
+  } catch (err) {
+    return c.json({ error: message(err) }, 400);
   }
 });
 

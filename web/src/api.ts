@@ -4,6 +4,10 @@ const configuredApi = import.meta.env.VITE_API_URL as string | undefined;
 
 export const API = configuredApi === undefined ? "/api" : configuredApi;
 
+export const SELLER_WALLET = (import.meta.env.VITE_SELLER_WALLET as string | undefined) ?? "";
+
+export const sellerHref = (name = "risk-pro") => `/seller?name=${name}${SELLER_WALLET ? `&wallet=${SELLER_WALLET}` : ""}`;
+
 export type Reliability = {
   supplier: string;
   calls: number;

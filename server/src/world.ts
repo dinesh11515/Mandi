@@ -34,6 +34,10 @@ export function signedWorldRequest(): { rp_context: RpContext; action: string; w
   return { rp_context: rpContext(), action: WORLD_ACTION, wallet: sellerWallet() };
 }
 
+export function worldConfig(): { action: string; wallet: Address } {
+  return { action: WORLD_ACTION, wallet: sellerWallet() };
+}
+
 export type AttestationPayload = {
   name: string;
   namehash: Hex;

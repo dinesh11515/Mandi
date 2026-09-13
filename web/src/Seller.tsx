@@ -1,12 +1,15 @@
 import { IDKitRequestWidget, selfieCheckLegacy, type IDKitResult, type RpContext } from "@worldcoin/idkit";
-import { useState } from "react";
-import { API, ensExplorer } from "./api";
+import { useEffect, useState } from "react";
+import { API, ensExplorer, SELLER_WALLET } from "./api";
 import { IconAlert, IconArrow, IconCheck, IconExternal, IconShieldCheck, Spinner } from "./icons";
 import { Topbar } from "./Shell";
 
 type Attestation = { name: string; wallet: string; hashedNullifier: string; expiry: number; issuer: string; sig: string };
 
-type SignedWorldRequest = { rp_context: RpContext; action: string; wallet: string };
+type WorldConfig = { action: string; wallet: string };
+type SignedWorldRequest = WorldConfig & { rp_context: RpContext };
+
+const FALLBACK_WALLET = SELLER_WALLET;
 
 const IDKIT_ERRORS: Record<string, string> = {
   user_rejected: "Selfie Check was cancelled in World App. Start again when you are ready.",
@@ -23,11 +26,18 @@ const IDKIT_ERRORS: Record<string, string> = {
   timeout: "World App did not return a proof in time. Start Selfie Check again.",
 };
 
+function syncWalletUrl(name: string, wallet: string) {
+  const next = new URL(location.href);
+  next.searchParams.set("name", name);
+  next.searchParams.set("wallet", wallet);
+  history.replaceState(null, "", `${next.pathname}${next.search}`);
+}
+
 export function Seller() {
   const params = new URLSearchParams(location.search);
   const label = params.get("name") ?? "risk-pro";
   const appId = (import.meta.env.VITE_WORLD_APP_ID as string | undefined) ?? "";
-  const [wallet, setWallet] = useState(params.get("wallet") ?? "");
+  const [wallet, setWallet] = useState(params.get("wallet") || FALLBACK_WALLET);
   const [rp, setRp] = useState<RpContext | null>(null);
   const [action, setAction] = useState("mandi-supplier-accreditation");
   const [open, setOpen] = useState(false);
@@ -35,18 +45,46 @@ export function Seller() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ attestation: Attestation; ensTx: string | null; ensError: string | null } | null>(null);
 
+  useEffect(() => {
+    if (wallet) {
+      syncWalletUrl(label, wallet);
+      return;
+    }
+    let alive = true;
+    fetch(`${API}/world/config`)
+      .then(async (res) => {
+        const body = (await res.json()) as WorldConfig & { error?: string };
+        const next = body.wallet || FALLBACK_WALLET;
+        if (!alive || !next) return;
+        if (body.action) setAction(body.action);
+        setWallet(next);
+        syncWalletUrl(label, next);
+      })
+      .catch(() => {
+        if (!alive || !FALLBACK_WALLET) return;
+        setWallet(FALLBACK_WALLET);
+        syncWalletUrl(label, FALLBACK_WALLET);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [label, wallet]);
+
   const start = async () => {
     setError(null);
     setBusy(true);
     try {
       const res = await fetch(`${API}/world/rp-signature`, { method: "POST" });
-      const body = (await res.json()) as SignedWorldRequest & { error?: string };
+      const body = (await res.json()) as SignedWorldRequest & RpContext & { error?: string };
       if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-      const nextWallet = wallet || body.wallet;
-      if (!nextWallet) throw new Error("no seller wallet in the URL or on the server");
+      const ctx = body.rp_context ?? (body.rp_id ? { rp_id: body.rp_id, nonce: body.nonce, created_at: body.created_at, expires_at: body.expires_at, signature: body.signature } : null);
+      if (!ctx) throw new Error("rp-signature response missing rp_context");
+      const nextWallet = wallet || body.wallet || FALLBACK_WALLET;
+      if (!nextWallet) throw new Error("no seller wallet configured");
       setWallet(nextWallet);
-      setAction(body.action);
-      setRp(body.rp_context);
+      syncWalletUrl(label, nextWallet);
+      if (body.action) setAction(body.action);
+      setRp(ctx);
       setOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -97,7 +135,7 @@ export function Seller() {
           <div className="card-b stack-sm">
             <dl className="kv">
               <dt>seller wallet</dt>
-              <dd className="mono truncate">{wallet || <span className="pill">filled when Selfie Check starts</span>}</dd>
+              <dd className="mono truncate">{wallet || <span className="pill">resolving seller wallet…</span>}</dd>
               <dt>signal</dt>
               <dd className="muted">the wallet address, so the proof cannot be replayed for another seller</dd>
               <dt>environment</dt>
@@ -129,7 +167,7 @@ export function Seller() {
               </div>
             </div>
             <div className="row">
-              <button className="btn primary" onClick={start} disabled={!appId || open || busy || !!result}>
+              <button className="btn primary" onClick={start} disabled={!appId || !wallet || open || busy || !!result}>
                 {busy ? <Spinner size={14} /> : <IconArrow size={15} />} Start Selfie Check
               </button>
               {!appId && <span className="pill bad">VITE_WORLD_APP_ID is not set</span>}
