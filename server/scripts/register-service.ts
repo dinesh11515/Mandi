@@ -1,3 +1,4 @@
+import { config } from "../src/config";
 import { registerService } from "../src/ens";
 
 async function main() {
@@ -8,7 +9,7 @@ async function main() {
   else console.log(`${result.name} already registered`);
   console.log(`records set on ${result.name} tx ${result.recordsTx}`);
   for (const [key, value] of Object.entries(result.records)) console.log(`  ${key} = ${value || "(empty)"}`);
-  console.log(`https://explorer.ens.dev/name/${result.name}`);
+  console.log(`${config.ens.explorer}${result.name}`);
 }
 
 main().catch((err) => {

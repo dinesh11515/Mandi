@@ -232,6 +232,25 @@ details ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); font-fam
 .stepcard.active .n { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 pre.json { margin: 0; padding: 12px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius-sm); font-family: var(--mono); font-size: 12px; line-height: 1.5; overflow: auto; }
 
+.how { list-style: none; margin: 0; padding: 10px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); font-size: 12.5px; color: var(--text-2); }
+.how li { display: inline-flex; align-items: center; gap: 8px; }
+.how li + li::before { content: ""; width: 14px; height: 1px; background: var(--line-strong); }
+.how li b { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent-soft); border: 1px solid rgba(245, 165, 36, 0.4); color: var(--accent); font-family: var(--mono); font-size: 10.5px; font-weight: 600; }
+.how li.note { margin-left: auto; color: var(--text-3); }
+.how li.note::before { display: none; }
+
+.walletbox { display: inline-flex; align-items: center; gap: 6px; }
+
+.depositrow { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.depositrow .grow { flex: 1 1 140px; min-width: 120px; }
+.depositrow .btn { flex: 0 0 auto; }
+
+.deposits { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 148px; overflow: auto; }
+.deposits li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 12.5px;
+  padding: 6px 10px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -252,6 +271,10 @@ pre.json { margin: 0; padding: 12px; background: var(--bg-elev); border: 1px sol
   .sticky { top: 0; }
 }
 @media (max-width: 640px) {
+  .how { gap: 6px; }
+  .how li + li::before { width: 8px; }
+  .how li.note { margin-left: 0; flex-basis: 100%; }
+  .depositrow .btn { width: 100%; }
   .topbar { padding: 10px 16px; }
   .name { min-width: 160px; max-width: 220px; }
   .page { padding: 16px 16px 48px; }

@@ -93,3 +93,19 @@ export const Logo = ({ size = 22 }: { size?: number }) => (
     <path d="M7 16V8l5 5 5-5v8" stroke="#0b0f17" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+export const IconWallet = (p: Props) => (
+  <svg {...base(p)}>
+    <path d="M3 8a2 2 0 012-2h12a2 2 0 012 2" />
+    <path d="M3 8v9a2 2 0 002 2h13a2 2 0 002-2v-3" />
+    <path d="M21 10h-4a2 2 0 000 4h4v-4z" />
+  </svg>
+);
+
+export const IconCoins = (p: Props) => (
+  <svg {...base(p)}>
+    <ellipse cx="12" cy="6" rx="7" ry="3" />
+    <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
+    <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+  </svg>
+);

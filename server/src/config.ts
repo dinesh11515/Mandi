@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
-import { SupplierSchema, type Depth, type Supplier } from "./types";
+import { SupplierSchema, type Depth, type Supplier, type SupplierInput } from "./types";
 
-export type { Depth, Supplier } from "./types";
+export type { Depth, Supplier, SupplierInput } from "./types";
 
 if (!process.env.VITEST) {
   try {
@@ -23,6 +23,8 @@ const port = Number(env("PORT") || 3000);
 
 const sellerAccount = () => env("SELLER_ACCOUNT_ID");
 
+const sellerOwner = () => env("SELLER_EVM_ADDRESS").toLowerCase();
+
 export const CAPABILITY = "financial-risk";
 
 export const SELLER_DEFAULTS = {
@@ -41,6 +43,8 @@ export const SUPPLIERS: Supplier[] = [
     priceHbar: 0.02,
     deepPriceHbar: 0.04,
     payTo: env("PAYTO_RISK_BASIC") || sellerAccount(),
+    owner: sellerOwner(),
+    upstream: "",
     context: "Protocol risk assessment from one on-chain metric. Unverified operator.",
   },
   {
@@ -50,6 +54,8 @@ export const SUPPLIERS: Supplier[] = [
     priceHbar: 0.05,
     deepPriceHbar: 0.1,
     payTo: env("PAYTO_RISK_PRO") || sellerAccount(),
+    owner: sellerOwner(),
+    upstream: "",
     context: "Protocol risk assessment from TVL, utilization and liquidity. Human-verified operator.",
   },
   {
@@ -59,6 +65,8 @@ export const SUPPLIERS: Supplier[] = [
     priceHbar: 0.04,
     deepPriceHbar: 0.08,
     payTo: env("PAYTO_RISK_PRO_2") || sellerAccount(),
+    owner: sellerOwner(),
+    upstream: "",
     context: "Protocol risk assessment from TVL, utilization and liquidity. Human-verified operator.",
   },
 ];
@@ -70,7 +78,10 @@ function loadExtras(): Supplier[] {
   try {
     const rows: unknown = JSON.parse(fs.readFileSync(extrasFile(), "utf8"));
     if (!Array.isArray(rows)) return [];
-    return rows.filter((row): row is Supplier => SupplierSchema.safeParse(row).success);
+    return rows.flatMap((row) => {
+      const parsed = SupplierSchema.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    });
   } catch {
     return [];
   }
@@ -87,19 +98,23 @@ export function assertSellerLabel(label: string): string {
 export function allSuppliers(): Supplier[] {
   const extras = loadExtras();
   const seen = new Set(SUPPLIERS.map((s) => s.label));
-  return [...SUPPLIERS, ...extras.filter((s) => !seen.has(s.label))];
+  return [...SUPPLIERS.map((s) => (s.owner ? s : { ...s, owner: sellerOwner() })), ...extras.filter((s) => !seen.has(s.label))];
+}
+
+export function isConfigSupplier(label: string): boolean {
+  return SUPPLIERS.some((s) => s.label === label);
 }
 
 export function supplierByLabel(label: string): Supplier | undefined {
   return allSuppliers().find((s) => s.label === label);
 }
 
-export function upsertSupplier(row: Supplier): Supplier {
+export function upsertSupplier(row: SupplierInput): Supplier {
   const label = assertSellerLabel(row.label);
-  if (SUPPLIERS.some((s) => s.label === label)) return SUPPLIERS.find((s) => s.label === label)!;
-  const next = { ...row, label, payTo: row.payTo || sellerAccount() };
-  if (!next.payTo) throw new Error("missing env SELLER_ACCOUNT_ID");
-  SupplierSchema.parse(next);
+  if (isConfigSupplier(label)) return supplierByLabel(label)!;
+  const draft = { ...row, label, payTo: row.payTo || sellerAccount(), owner: (row.owner ?? "").toLowerCase() };
+  if (!draft.payTo) throw new Error("missing env SELLER_ACCOUNT_ID");
+  const next = SupplierSchema.parse(draft);
   const extras = loadExtras().filter((s) => s.label !== label);
   extras.push(next);
   fs.mkdirSync(path.dirname(extrasFile()), { recursive: true });
@@ -140,6 +155,7 @@ export const config = {
     resolver: env("ENS_RESOLVER"),
     fromBlock: env("ENS_FROM_BLOCK"),
     sellerAddress: env("SELLER_EVM_ADDRESS"),
+    explorer: env("ENS_EXPLORER_URL") || "https://explorer.ens.dev/name/",
   },
   graphApiKey: env("GRAPH_API_KEY"),
   webDist: env("WEB_DIST"),

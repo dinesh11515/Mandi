@@ -3,11 +3,14 @@ import { paidFetch } from "../src/buyer/executor";
 import { allSuppliers, config } from "../src/config";
 import { hashscanTx } from "../src/hedera";
 
+process.env.MANDI_UNFUNDED_OK ??= "1";
+
 const label = process.argv[2] ?? allSuppliers()[0]!.label;
 const protocol = process.argv[3] ?? "aave";
 const route = process.argv[4] === "deep" ? "assess/deep" : "assess";
 
 async function main() {
+  console.log("MANDI_UNFUNDED_OK=1: this script pays with the executor's own key, so the deposit check is bypassed");
   const url = `${config.publicUrl}/s/${label}/${route}?protocol=${encodeURIComponent(protocol)}`;
   console.log(`GET ${url}`);
   const started = Date.now();

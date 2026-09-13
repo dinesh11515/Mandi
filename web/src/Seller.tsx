@@ -1,16 +1,30 @@
 import { IDKitRequestWidget, selfieCheckLegacy, type IDKitResult, type RpContext } from "@worldcoin/idkit";
-import { useEffect, useState } from "react";
-import { API, ensExplorer, sepoliaTx } from "./api";
-import { IconAlert, IconArrow, IconCheck, IconExternal, IconShieldCheck, Spinner } from "./icons";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ensExplorer, sepoliaTx } from "./api";
+import { IconAlert, IconArrow, IconCheck, IconExternal, IconShieldCheck, IconWallet, Spinner } from "./icons";
 import { Topbar } from "./Shell";
+import "./seller.css";
+import {
+  loadListings,
+  loadWorldConfig,
+  message,
+  registerSeller,
+  rpSignature,
+  sellerRegistrationMessage,
+  verifySelfie,
+  type SellerRow,
+  type RegisterResult,
+  type Tier,
+  type VerifyResult,
+  type WorldConfig,
+} from "./sellerApi";
+import { shortAddress, useWallet } from "./wallet";
 
-type AttestationRecord = { name: string; wallet: string; hashedNullifier: string; expiry: number; issuer: string; sig: string };
-
-type WorldConfig = { action: string; wallet: string; labels: string[] };
-type SignedWorldRequest = { action: string; wallet: string; rp_context: RpContext };
-type RegisterResult = { name: string; owner: string; minted: boolean; mintTx: string | null; recordsTx: string; records: Record<string, string> };
-
-const PRICE_KEY = "mandi:price";
+const DEFAULT_PRICE = "0.03";
+const DEFAULT_CAPABILITY = "financial-risk";
+const LABEL_PATTERN = /^[a-z0-9-]{1,16}$/;
+const ACCOUNT_PATTERN = /^0\.0\.\d+$/;
+const PHASES = ["waiting for signature", "minting on Sepolia", "writing records"];
 
 const IDKIT_ERRORS: Record<string, string> = {
   user_rejected: "Selfie Check was cancelled in World App. Start again when you are ready.",
@@ -27,249 +41,370 @@ const IDKIT_ERRORS: Record<string, string> = {
   timeout: "World App did not return a proof in time. Start Selfie Check again.",
 };
 
-function syncUrl(name: string, wallet: string) {
+function syncUrl(label: string) {
   const next = new URL(location.href);
-  if (name) next.searchParams.set("name", name);
-  if (wallet) next.searchParams.set("wallet", wallet);
+  if (label) next.searchParams.set("name", label);
+  else next.searchParams.delete("name");
   history.replaceState(null, "", `${next.pathname}${next.search}`);
 }
 
 export function Seller() {
+  const wallet = useWallet();
+  const address = wallet.address ? wallet.address.toLowerCase() : null;
   const appId = (import.meta.env.VITE_WORLD_APP_ID as string | undefined) ?? "";
+
+  const [config, setConfig] = useState<WorldConfig | null>(null);
+  const [listings, setListings] = useState<SellerRow[]>([]);
+  const [listingsError, setListingsError] = useState<string | null>(null);
+
   const [label, setLabel] = useState(() => new URLSearchParams(location.search).get("name") ?? "");
-  const [labels, setLabels] = useState<string[]>([]);
-  const [wallet, setWallet] = useState(() => new URLSearchParams(location.search).get("wallet") ?? "");
-  const [listed, setListed] = useState(false);
-  const [listing, setListing] = useState<RegisterResult | null>(null);
+  const [tier, setTier] = useState<Tier>("basic");
+  const [price, setPrice] = useState(DEFAULT_PRICE);
+  const [payTo, setPayTo] = useState("");
+  const [upstream, setUpstream] = useState("");
+  const [capability, setCapability] = useState(DEFAULT_CAPABILITY);
+  const [context, setContext] = useState("");
+
+  const [busy, setBusy] = useState<"register" | "selfie" | null>(null);
+  const [phase, setPhase] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [registered, setRegistered] = useState<RegisterResult | null>(null);
+  const [ready, setReady] = useState<string | null>(null);
+
   const [rp, setRp] = useState<RpContext | null>(null);
   const [action, setAction] = useState("");
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<"register" | "enroll" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ attestation: AttestationRecord; ensTx: string | null; ensError: string | null } | null>(null);
+  const [result, setResult] = useState<VerifyResult | null>(null);
+
+  const selfieRef = useRef<HTMLElement | null>(null);
+  const preselected = useRef(false);
 
   useEffect(() => {
     let alive = true;
-    fetch(`${API}/world/config`)
-      .then(async (res) => {
-        const body = (await res.json()) as Partial<WorldConfig> & { error?: string };
+    loadWorldConfig()
+      .then((body) => {
         if (!alive) return;
-        if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-        if (body.labels?.length) setLabels(body.labels);
+        setConfig(body);
         if (body.action) setAction(body.action);
-        const configured = body.wallet;
-        if (configured) setWallet((prev) => prev || configured);
       })
-      .catch((err) => alive && setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => alive && setError(message(err)));
     return () => {
       alive = false;
     };
   }, []);
 
-  useEffect(() => {
-    syncUrl(label, wallet);
-  }, [label, wallet]);
+  const refresh = useCallback(async (owner: string) => {
+    try {
+      setListings(await loadListings(owner));
+      setListingsError(null);
+    } catch (err) {
+      setListingsError(message(err));
+    }
+  }, []);
 
   useEffect(() => {
-    let alive = true;
-    setListed(false);
-    setListing(null);
+    if (!address) {
+      setListings([]);
+      setListingsError(null);
+      return;
+    }
+    void refresh(address);
+  }, [address, refresh, registered, result]);
+
+  useEffect(() => {
+    syncUrl(label);
+  }, [label]);
+
+  const select = useCallback((row: SellerRow) => {
+    setLabel(row.label);
+    setTier(row.depth);
+    setPrice(String(row.priceHbar));
+    setPayTo(row.payTo);
+    setUpstream(row.upstream ?? "");
+    setCapability(row.capability);
+    setContext(row.context);
+    setRegistered(null);
     setResult(null);
     setRp(null);
     setOpen(false);
-    if (!label) return;
-    fetch(`${API}/resolve/${label}.mandi.eth`)
-      .then((res) => alive && setListed(res.ok))
-      .catch(() => alive && setListed(false));
-    return () => {
-      alive = false;
-    };
-  }, [label]);
+    setError(null);
+    setReady(row.listed ? row.label : null);
+    if (row.listed) requestAnimationFrame(() => selfieRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, []);
 
-  const mint = async (): Promise<RegisterResult> => {
-    const res = await fetch(`${API}/sellers/register`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ label }),
-    });
-    const body = (await res.json()) as RegisterResult & { error?: string };
-    if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-    setListing(body);
-    setListed(true);
-    setLabels((prev) => (prev.includes(label) ? prev : [...prev, label]));
-    return body;
-  };
+  useEffect(() => {
+    if (preselected.current || !label || listings.length === 0) return;
+    const row = listings.find((item) => item.label === label);
+    if (!row) return;
+    preselected.current = true;
+    select(row);
+  }, [label, listings, select]);
 
-  const selfie = async () => {
-    const res = await fetch(`${API}/world/rp-signature`, { method: "POST" });
-    const body = (await res.json()) as Partial<SignedWorldRequest> & { error?: string };
-    if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-    if (!body.rp_context) throw new Error("rp-signature response missing rp_context");
-    const nextWallet = wallet || body.wallet || "";
-    if (!nextWallet) throw new Error("no seller wallet configured");
-    setWallet(nextWallet);
-    if (body.action) setAction(body.action);
-    setRp(body.rp_context);
-    setOpen(true);
-  };
+  const parent = config?.parent ?? "";
+  const name = label && parent ? `${label}.${parent}` : "";
+  const priceHbar = Number(price);
+  const problem = !LABEL_PATTERN.test(label)
+    ? "name is 1–16 characters: lowercase letters, digits and hyphens"
+    : !Number.isFinite(priceHbar) || priceHbar <= 0
+      ? "price per call must be a positive number of HBAR"
+      : !ACCOUNT_PATTERN.test(payTo.trim())
+        ? "payTo must be a Hedera account id such as 0.0.1234"
+        : !capability.trim()
+          ? "capability is required"
+          : !context.trim()
+            ? "description is required"
+            : !parent
+              ? "waiting for the registry parent name"
+              : null;
 
   const register = async () => {
+    if (!address || problem) return;
     setError(null);
+    setRegistered(null);
+    setResult(null);
+    setRp(null);
+    setOpen(false);
     setBusy("register");
+    setPhase(0);
+    const account = payTo.trim();
+    const cap = capability.trim();
     try {
-      await mint();
+      const signature = await wallet.signMessage(sellerRegistrationMessage({ name, owner: address, payTo: account, priceHbar, capability: cap }));
+      setPhase(1);
+      const body = await registerSeller({
+        label,
+        owner: address,
+        signature,
+        payTo: account,
+        priceHbar,
+        capability: cap,
+        depth: tier,
+        upstream: upstream.trim(),
+        context: context.trim(),
+      });
+      setRegistered(body);
+      setReady(label);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(message(err));
     } finally {
       setBusy(null);
     }
   };
 
-  const enroll = async () => {
+  const startSelfie = async () => {
+    if (!address || !ready) return;
     setError(null);
-    setBusy("enroll");
+    setBusy("selfie");
     try {
-      if (!listed) await mint();
-      await selfie();
+      const signed = await rpSignature(ready, address);
+      if (!signed.rp_context) throw new Error("rp-signature response is missing rp_context");
+      if (signed.action) setAction(signed.action);
+      setRp(signed.rp_context);
+      setOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(message(err));
     } finally {
       setBusy(null);
     }
   };
 
   const handleVerify = async (idkitResponse: IDKitResult) => {
-    const res = await fetch(`${API}/world/verify`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ label, wallet, idkitResponse }),
-    });
-    const body = await res.json();
-    if (!res.ok) {
-      const message = (body as { error?: string }).error ?? `${res.status}`;
-      setError(message);
-      throw new Error(message);
+    if (!address || !ready) throw new Error("connect a wallet and pick a listed name first");
+    try {
+      setResult(await verifySelfie(ready, address, idkitResponse));
+    } catch (err) {
+      setError(message(err));
+      throw err instanceof Error ? err : new Error(message(err));
     }
-    setResult(body);
   };
 
-  const onChain = listed || !!listing;
-  const step = result ? 3 : onChain || rp || open ? 2 : 1;
-  const name = label ? `${label}.mandi.eth` : "your-name.mandi.eth";
-  const ready = Boolean(label && appId && wallet);
-  const price = listing?.records[PRICE_KEY];
+  const connected = wallet.status === "connected" && !!address;
+  const readyRow = listings.find((row) => row.label === ready) ?? null;
+  const readyName = registered?.name ?? readyRow?.name ?? (ready && parent ? `${ready}.${parent}` : "");
 
   return (
     <>
-      <Topbar />
+      <Topbar wallet={wallet} />
       <main className="seller-wrap">
         <div className="hero">
           <div>
-            <h1>Become a seller</h1>
+            <h1>List your service on Mandi</h1>
             <p>
-              Pick a new name, mint it on ENS, then Selfie Check. The buyer agent will discover you from <span className="mono">mandi.eth</span> and only pay you if
-              policy allows an attested supplier.
+              Connect the wallet that will own the name, register it under <span className="mono">{parent || "the Mandi registry"}</span>, then prove a human is behind
+              it with Selfie Check. Buyer agents discover you from ENS and pay per call over x402.
             </p>
           </div>
         </div>
+
         <section className="card">
           <div className="card-h">
             <h2>
-              <IconShieldCheck size={16} /> {name}
+              <IconWallet size={16} /> Step 0 · Connect your wallet
             </h2>
-            {label && (
+            {connected ? <span className="pill ok">connected</span> : <span className="pill warn">not connected</span>}
+          </div>
+          <div className="card-b stack-sm">
+            <p className="muted seller-note">
+              This wallet becomes the owner of the ENS name on Sepolia and the signal for Selfie Check. Everything below stays disabled until it is connected, and the
+              server only accepts a registration signed by it.
+            </p>
+            {connected ? (
+              <dl className="kv">
+                <dt>wallet</dt>
+                <dd className="mono truncate" title={address ?? ""}>
+                  {address}
+                </dd>
+              </dl>
+            ) : (
+              <div className="row">
+                <button type="button" className="btn primary" onClick={() => void wallet.connect().catch(() => undefined)} disabled={wallet.status === "connecting" || wallet.status === "absent"}>
+                  {wallet.status === "connecting" ? <Spinner size={14} /> : <IconWallet size={15} />}
+                  {wallet.status === "absent" ? "no browser wallet found" : "Connect wallet"}
+                </button>
+                {wallet.status === "absent" && <span className="muted">install MetaMask, then reload this page.</span>}
+              </div>
+            )}
+            {wallet.error && (
+              <div className="notice bad">
+                <IconAlert size={16} /> {wallet.error}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {connected && (
+          <section className="card">
+            <div className="card-h">
+              <h2>My listings</h2>
+              <span className="muted">{shortAddress(address!)}</span>
+            </div>
+            <div className="card-b stack-sm">
+              {listingsError && (
+                <div className="notice bad">
+                  <IconAlert size={16} /> {listingsError}
+                </div>
+              )}
+              {listings.length === 0 && !listingsError && <div className="muted">No names owned by this wallet yet. Register one below.</div>}
+              {listings.length > 0 && (
+                <div className="listings">
+                  {listings.map((row) => (
+                    <div
+                      key={row.label}
+                      className={`listing ${row.label === label ? "on" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => select(row)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          select(row);
+                        }
+                      }}
+                    >
+                      <div className="who">
+                        <b>{row.name}</b>
+                        <span className="pill">{row.depth}</span>
+                      </div>
+                      <div className="badges">
+                        {row.listed ? <span className="pill ok">listed on ENS</span> : <span className="pill warn">not minted</span>}
+                        {row.attested ? <span className="pill ok">attested</span> : <span className="pill">not attested</span>}
+                      </div>
+                      <div className="meta">
+                        <span>{row.capability}</span>
+                        <span className="num">{row.priceHbar} HBAR / call</span>
+                        <span className="mono">pays {row.payTo}</span>
+                        {row.upstream && <span className="mono truncate">{row.upstream}</span>}
+                      </div>
+                      <a className="navlink" href={ensExplorer(row.name)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                        ENS explorer <IconExternal size={14} />
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        <section className="card">
+          <div className="card-h">
+            <h2>Step 1 · Name, price and payout</h2>
+            {name && (
               <a className="navlink" href={ensExplorer(name)} target="_blank" rel="noreferrer">
                 ENS explorer <IconExternal size={14} />
               </a>
             )}
           </div>
           <div className="card-b stack-sm">
-            <label className="field">
-              supplier name
-              <input
-                className="text"
-                value={label}
-                maxLength={16}
-                placeholder="acme-risk"
-                spellCheck={false}
-                disabled={!!busy || !!result}
-                onChange={(e) => setLabel(e.target.value.trim().toLowerCase())}
-              />
-            </label>
-            {labels.length > 0 && (
-              <div className="chips" role="group" aria-label="names already in the directory">
-                {labels.map((item) => (
-                  <button key={item} type="button" className={`chip ${item === label ? "on" : ""}`} onClick={() => setLabel(item)} disabled={!!busy || !!result}>
-                    {item}
-                  </button>
-                ))}
+            <fieldset className="formset stack-sm" disabled={!connected || !!busy}>
+              <div className="formgrid">
+                <label className="field">
+                  name
+                  <input
+                    className="text"
+                    value={label}
+                    maxLength={16}
+                    placeholder="acme-risk"
+                    spellCheck={false}
+                    onChange={(e) => setLabel(e.target.value.trim().toLowerCase())}
+                  />
+                </label>
+                <label className="field">
+                  tier
+                  <select className="text" value={tier} onChange={(e) => setTier(e.target.value as Tier)}>
+                    <option value="basic">basic</option>
+                    <option value="pro">pro</option>
+                  </select>
+                </label>
+                <label className="field">
+                  price per call (HBAR)
+                  <input className="text num" value={price} inputMode="decimal" spellCheck={false} onChange={(e) => setPrice(e.target.value.trim())} />
+                </label>
+                <label className="field">
+                  Hedera payTo account
+                  <input className="text mono" value={payTo} placeholder="0.0.1234" spellCheck={false} onChange={(e) => setPayTo(e.target.value.trim())} />
+                </label>
+                <label className="field">
+                  capability
+                  <input className="text" value={capability} spellCheck={false} onChange={(e) => setCapability(e.target.value)} />
+                </label>
+                <label className="field">
+                  upstream API URL <span className="hint">optional</span>
+                  <input className="text mono" value={upstream} placeholder="https://api.example.com/score" spellCheck={false} onChange={(e) => setUpstream(e.target.value.trim())} />
+                </label>
+                <label className="field wide">
+                  description <span className="hint">agent-context: one line telling a buyer agent what you sell</span>
+                  <textarea className="text" value={context} rows={2} onChange={(e) => setContext(e.target.value)} />
+                </label>
               </div>
-            )}
-            <dl className="kv">
-              <dt>seller wallet</dt>
-              <dd className="mono truncate">{wallet || <span className="pill">resolving seller wallet…</span>}</dd>
-              <dt>listing</dt>
-              <dd>{onChain ? <span className="pill ok">on ENS</span> : <span className="pill">not minted yet</span>}</dd>
-              {price && (
-                <>
-                  <dt>price</dt>
-                  <dd className="num">{price} / call</dd>
-                </>
-              )}
-            </dl>
-            <div className="steps">
-              <div className={`stepcard ${onChain ? "done" : "active"}`}>
-                <span className="n">{onChain ? <IconCheck size={13} /> : "1"}</span>
-                <div>
-                  <b>Register on ENS</b>
-                  <div className="muted">Mints {name} live on Sepolia and publishes the x402 endpoint.</div>
-                </div>
+              <div className="namepreview">
+                {label && parent ? (
+                  <>
+                    will be minted as <b>{name}</b> to {address}
+                  </>
+                ) : (
+                  <>your name will be minted under {parent || "the Mandi registry"}</>
+                )}
               </div>
-              <div className={`stepcard ${step > 2 ? "done" : step === 2 ? "active" : ""}`}>
-                <span className="n">{step > 2 ? <IconCheck size={13} /> : "2"}</span>
-                <div>
-                  <b>Selfie Check in World App</b>
-                  <div className="muted">Opens immediately after the mint. Scan the QR, or stay in World App.</div>
-                </div>
-              </div>
-              <div className={`stepcard ${step === 3 ? "done" : ""}`}>
-                <span className="n">{step === 3 ? <IconCheck size={13} /> : "3"}</span>
-                <div>
-                  <b>Live on the marketplace</b>
-                  <div className="muted">Attested for 90 days. Refresh the console — the new name is in the directory.</div>
-                </div>
-              </div>
-            </div>
-            <div className="row">
-              <button className="btn primary" onClick={enroll} disabled={!ready || open || !!busy || !!result}>
-                {busy === "enroll" ? <Spinner size={14} /> : <IconArrow size={15} />} {onChain ? "Start Selfie Check" : "Register & Selfie Check"}
-              </button>
-              {onChain && (
-                <button className="btn ghost" onClick={register} disabled={!ready || !!busy || !!result}>
-                  {busy === "register" ? <Spinner size={14} /> : <IconArrow size={15} />} Refresh ENS records
+              <p className="muted seller-note">Mandi will list the upstream endpoint on ENS as <span className="mono">mandi:upstream</span>; the demo scorer serves calls.</p>
+              <div className="row">
+                <button type="button" className="btn primary" onClick={() => void register()} disabled={!connected || !!problem || !!busy}>
+                  {busy === "register" ? <Spinner size={14} /> : <IconArrow size={15} />} Sign &amp; register
                 </button>
-              )}
-              {!appId && <span className="pill bad">VITE_WORLD_APP_ID is not set</span>}
-            </div>
-            {busy === "enroll" && !listing && <div className="muted">minting on Sepolia, then opening World ID…</div>}
-            {listing && (
-              <div className="notice ok">
-                <IconCheck size={16} />
-                <span>
-                  {listing.minted ? "minted" : "already listed"} {listing.name}
-                  {" · "}
-                  <a href={sepoliaTx(listing.recordsTx)} target="_blank" rel="noreferrer">
-                    records tx <IconExternal size={14} />
-                  </a>
-                  {listing.mintTx && (
-                    <>
-                      {" · "}
-                      <a href={sepoliaTx(listing.mintTx)} target="_blank" rel="noreferrer">
-                        mint tx <IconExternal size={14} />
-                      </a>
-                    </>
-                  )}
-                </span>
+                {connected && problem && <span className="muted">{problem}</span>}
+                {!connected && <span className="muted">connect a wallet to register</span>}
+              </div>
+            </fieldset>
+            {busy === "register" && (
+              <div className="progress">
+                {PHASES.map((text, i) => (
+                  <div key={text} className={`stepcard ${i < phase ? "done" : phase === 1 || i === phase ? "active" : ""}`}>
+                    <span className="n">{i < phase ? <IconCheck size={13} /> : i + 1}</span>
+                    <div>
+                      <b>{text}</b>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {error && (
@@ -277,17 +412,91 @@ export function Seller() {
                 <IconAlert size={16} /> {error}
               </div>
             )}
-            {rp && wallet && (
+            {registered && (
+              <div className="outcome ok">
+                <div className="row between">
+                  <b>
+                    {registered.minted ? "minted" : "records refreshed"} {registered.name}
+                  </b>
+                  <a className="navlink" href={ensExplorer(registered.name)} target="_blank" rel="noreferrer">
+                    ENS explorer <IconExternal size={14} />
+                  </a>
+                </div>
+                <div className="row">
+                  {registered.mintTx && (
+                    <a href={sepoliaTx(registered.mintTx)} target="_blank" rel="noreferrer">
+                      mint tx <IconExternal size={14} />
+                    </a>
+                  )}
+                  <a href={sepoliaTx(registered.recordsTx)} target="_blank" rel="noreferrer">
+                    records tx <IconExternal size={14} />
+                  </a>
+                </div>
+                <div className="recordlist mono">
+                  {Object.entries(registered.records).map(([key, value]) => (
+                    <div key={key}>
+                      <span className="muted">{key}</span>
+                      <span>{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="card" ref={selfieRef}>
+          <div className="card-h">
+            <h2>
+              <IconShieldCheck size={16} /> Step 2 · Selfie Check
+            </h2>
+            {result ? <span className="pill ok">attested</span> : ready ? <span className="pill warn">pending</span> : <span className="pill">register first</span>}
+          </div>
+          <div className="card-b stack-sm">
+            <p className="muted seller-note">
+              World App proves a unique human stands behind {readyName || "the name"}, signalled with your connected wallet. Policies that require a verified supplier
+              only pay attested sellers.
+            </p>
+            <div className="steps">
+              <div className={`stepcard ${ready ? "done" : "active"}`}>
+                <span className="n">{ready ? <IconCheck size={13} /> : "1"}</span>
+                <div>
+                  <b>Name is live on ENS</b>
+                  <div className="muted">{ready ? readyName : "register above, or pick a listed name from My listings."}</div>
+                </div>
+              </div>
+              <div className={`stepcard ${result ? "done" : ready ? "active" : ""}`}>
+                <span className="n">{result ? <IconCheck size={13} /> : "2"}</span>
+                <div>
+                  <b>Selfie Check in World App</b>
+                  <div className="muted">Scan the QR from a laptop, or open this page inside World App on your phone.</div>
+                </div>
+              </div>
+              <div className={`stepcard ${result ? "done" : ""}`}>
+                <span className="n">{result ? <IconCheck size={13} /> : "3"}</span>
+                <div>
+                  <b>Live on the marketplace</b>
+                  <div className="muted">Attested for 90 days and discoverable from the buyer console.</div>
+                </div>
+              </div>
+            </div>
+            <div className="row">
+              <button type="button" className="btn primary" onClick={() => void startSelfie()} disabled={!connected || !ready || !appId || open || !!busy || !!result}>
+                {busy === "selfie" ? <Spinner size={14} /> : <IconShieldCheck size={15} />} Start Selfie Check
+              </button>
+              {!appId && <span className="pill bad">VITE_WORLD_APP_ID is not set</span>}
+            </div>
+            {rp && address && ready && (
               <IDKitRequestWidget
                 open={open}
                 onOpenChange={setOpen}
                 app_id={appId as `app_${string}`}
                 action={action}
-                action_description={`Accredit ${name} on Mandi`}
+                action_description={`Accredit ${readyName} on Mandi`}
                 rp_context={rp}
                 allow_legacy_proofs={true}
                 environment="production"
-                preset={selfieCheckLegacy({ signal: wallet })}
+                preset={selfieCheckLegacy({ signal: address })}
                 handleVerify={handleVerify}
                 onSuccess={() => setOpen(false)}
                 onError={(code) => {
@@ -304,11 +513,7 @@ export function Seller() {
                 </div>
                 <div className="muted">
                   ENS <span className="mono">mandi:verified</span>:{" "}
-                  {result.ensTx ? (
-                    <span className="mono">{result.ensTx.slice(0, 18)}…</span>
-                  ) : (
-                    <span className="pill warn">{result.ensError ?? "record not written"}</span>
-                  )}{" "}
+                  {result.ensTx ? <span className="mono">{result.ensTx.slice(0, 18)}…</span> : <span className="pill warn">{result.ensError ?? "record not written"}</span>}{" "}
                   <span className="dim">(display hint only)</span>
                 </div>
                 <pre className="json">{JSON.stringify(result.attestation, null, 2)}</pre>

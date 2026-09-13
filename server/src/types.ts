@@ -20,6 +20,22 @@ export const DepthSchema = z.enum(["basic", "pro"]);
 
 export type Depth = z.infer<typeof DepthSchema>;
 
+export const HederaAccountSchema = z
+  .string()
+  .regex(/^\d+\.\d+\.\d+$/, "expected a Hedera account id like 0.0.1234");
+
+const httpUrlOrEmpty = (value: string): boolean => {
+  if (!value) return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+export const UpstreamSchema = z.string().refine(httpUrlOrEmpty, "expected an http(s) URL").default("");
+
 export const SupplierSchema = z.object({
   label: z.string().min(1),
   capability: z.string().min(1),
@@ -28,9 +44,12 @@ export const SupplierSchema = z.object({
   deepPriceHbar: z.number().positive(),
   payTo: z.string(),
   context: z.string(),
+  owner: z.string().default(""),
+  upstream: UpstreamSchema,
 });
 
 export type Supplier = z.infer<typeof SupplierSchema>;
+export type SupplierInput = z.input<typeof SupplierSchema>;
 
 export const PolicySchema = z
   .object({
@@ -61,8 +80,21 @@ export const ActivationRequestSchema = z.object({
 
 export const SellerRegistrationSchema = z.object({
   label: z.string().min(1),
-  depth: DepthSchema.optional(),
-  priceHbar: z.number().positive().optional(),
+  owner: EvmAddressSchema,
+  signature: HexSchema,
+  payTo: HederaAccountSchema,
+  priceHbar: z.number().positive(),
+  capability: z.string().min(1),
+  depth: DepthSchema,
+  upstream: UpstreamSchema,
+  context: z.string(),
+});
+
+export type SellerRegistration = z.infer<typeof SellerRegistrationSchema>;
+
+export const WorldRpRequestSchema = z.object({
+  label: z.string().min(1),
+  wallet: EvmAddressSchema,
 });
 
 export const WorldVerificationSchema = z.object({
@@ -79,6 +111,7 @@ export const ServiceCardSchema = z.object({
   price: HbarAmountSchema,
   chain: z.string().min(1),
   verified: z.boolean().default(false),
+  upstream: z.string().optional(),
 });
 
 export type ServiceCard = z.infer<typeof ServiceCardSchema>;

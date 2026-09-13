@@ -64,9 +64,11 @@ function deps(opts: Options): { deps: AgentDeps; paid: string[] } {
           card: c,
           policy: entry.policy,
           policyHash: entry.policyHash,
+          signer: entry.signer,
           ledger: entry.ledger,
           reliability: await reliabilityOf(c.name),
           attestation: attestationOf(c.name),
+          funding: { depositedHbar: 10, spentHbar: entry.ledger.spentHbar, availableHbar: 10 - entry.ledger.spentHbar },
         });
         if (decision.status !== "approved") return { decision, payment: null, hcsTx: null, ledger: entry.ledger };
         const fulfilled = !opts.failing?.includes(c.name);

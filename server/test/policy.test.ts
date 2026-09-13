@@ -48,6 +48,12 @@ describe("activatePolicy", () => {
     expect(getActivePolicy(entry.policyHash)?.ledger).toEqual({ spentHbar: 0, calls: 0 });
   });
 
+  it("asks for a wallet signature when HUMAN_KEY is unset", async () => {
+    delete process.env.HUMAN_KEY;
+    await expect(activatePolicy({ policy: SAMPLE_POLICY })).rejects.toThrow("sign the mandate with a wallet");
+    process.env.HUMAN_KEY = humanKey;
+  });
+
   it("rejects an expired mandate", async () => {
     await expect(activatePolicy({ policy: SAMPLE_POLICY, expiry: 1 })).rejects.toThrow("expired");
   });

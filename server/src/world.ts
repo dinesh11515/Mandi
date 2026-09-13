@@ -6,8 +6,8 @@ import { recoverMessageAddress, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { namehash } from "viem/ens";
 import { canonicalize, sha256 } from "./buyer/policy";
-import { allSuppliers, config, requireEnv, supplierByLabel } from "./config";
-import { deployerAccount, RECORD_KEYS, serviceName, setTextRecord } from "./ens";
+import { allSuppliers, config, requireEnv } from "./config";
+import { assertSupplierOwner, RECORD_KEYS, serviceName, setTextRecord } from "./ens";
 
 export const WORLD_ACTION = config.world.action;
 export const ATTESTATION_TTL_SECONDS = 90 * 24 * 60 * 60;
@@ -25,17 +25,23 @@ export function rpContext(): RpContext {
   };
 }
 
-export function sellerWallet(): Address {
-  if (config.ens.sellerAddress) return config.ens.sellerAddress as Address;
-  return deployerAccount().address;
+export function signedWorldRequest(input: { label: string; wallet: Address }): {
+  rp_context: RpContext;
+  action: string;
+  wallet: Address;
+  name: string;
+} {
+  assertSupplierOwner(input.label, input.wallet);
+  return { rp_context: rpContext(), action: WORLD_ACTION, wallet: input.wallet, name: serviceName(input.label) };
 }
 
-export function signedWorldRequest(): { rp_context: RpContext; action: string; wallet: Address } {
-  return { rp_context: rpContext(), action: WORLD_ACTION, wallet: sellerWallet() };
-}
-
-export function worldConfig(): { action: string; wallet: Address; labels: string[] } {
-  return { action: WORLD_ACTION, wallet: sellerWallet(), labels: allSuppliers().map((s) => s.label) };
+export function worldConfig(): { action: string; labels: string[]; parent: string; explorer: string } {
+  return {
+    action: WORLD_ACTION,
+    labels: allSuppliers().map((s) => s.label),
+    parent: config.ens.parentName,
+    explorer: config.ens.explorer,
+  };
 }
 
 export type AttestationPayload = {
@@ -129,7 +135,7 @@ export async function verifyAndAttest(
   input: { label: string; wallet: Address; idkitResponse: unknown },
   deps: VerifyDeps = { fetch },
 ): Promise<{ attestation: AttestationRecord; ensTx: string | null; ensError: string | null }> {
-  if (!supplierByLabel(input.label)) throw new Error(`unknown supplier ${input.label}`);
+  assertSupplierOwner(input.label, input.wallet);
   const name = serviceName(input.label);
   const rpId = requireEnv("WORLD_RP_ID");
   const res = await deps.fetch(`https://developer.world.org/api/v4/verify/${rpId}`, {

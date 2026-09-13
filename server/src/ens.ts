@@ -17,7 +17,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import { labelhash, namehash, normalize } from "viem/ens";
-import { allSuppliers, assertSellerLabel, config, requireEnv, SELLER_DEFAULTS, supplierByLabel, upsertSupplier, type Depth } from "./config";
+import { allSuppliers, assertSellerLabel, config, isConfigSupplier, requireEnv, supplierByLabel, type Supplier } from "./config";
 import { formatHbar } from "./hbar";
 import { ServiceCardSchema, type ServiceCard } from "./types";
 
@@ -41,6 +41,7 @@ export const RECORD_KEYS = {
   price: "mandi:price",
   chain: "mandi:chain",
   verified: "mandi:verified",
+  upstream: "mandi:upstream",
 } as const;
 
 export const registrarAbi = parseAbi([
@@ -186,13 +187,34 @@ export function labelOf(name: string): string {
 export function serviceRecords(label: string): Record<string, string> {
   const supplier = supplierByLabel(label);
   if (!supplier) throw new Error(`unknown supplier ${label}`);
-  return {
+  const records: Record<string, string> = {
     [RECORD_KEYS.agentContext]: supplier.context,
     [RECORD_KEYS.agentEndpoint]: `${config.publicUrl}/s/${label}/assess`,
     [RECORD_KEYS.capability]: supplier.capability,
     [RECORD_KEYS.price]: formatHbar(supplier.priceHbar),
     [RECORD_KEYS.chain]: config.x402.network,
   };
+  if (supplier.upstream) records[RECORD_KEYS.upstream] = supplier.upstream;
+  return records;
+}
+
+export function ownerOf(supplier: Supplier): string {
+  if (supplier.owner) return supplier.owner.toLowerCase();
+  if (!isConfigSupplier(supplier.label)) return "";
+  try {
+    return deployerAccount().address.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+export function assertSupplierOwner(label: string, wallet: string): Supplier {
+  const supplier = supplierByLabel(label);
+  if (!supplier) throw new Error(`unknown supplier ${label}`);
+  const owner = ownerOf(supplier);
+  if (!owner) throw new Error(`${serviceName(label)} has no owner on record; register it from the seller page first`);
+  if (owner !== wallet.toLowerCase()) throw new Error(`${wallet} does not own ${serviceName(label)}`);
+  return supplier;
 }
 
 const ONE_YEAR = 365 * 24 * 60 * 60;
@@ -206,26 +228,16 @@ export type RegisterResult = {
   records: Record<string, string>;
 };
 
-export type RegisterOpts = { depth?: Depth; priceHbar?: number };
+export type RegisterOpts = { owner?: Address };
 
 export async function registerService(label: string, opts: RegisterOpts = {}): Promise<RegisterResult> {
   const normalized = assertSellerLabel(label);
-  if (!supplierByLabel(normalized)) {
-    const priceHbar = opts.priceHbar ?? SELLER_DEFAULTS.priceHbar;
-    upsertSupplier({
-      label: normalized,
-      capability: SELLER_DEFAULTS.capability,
-      depth: opts.depth ?? SELLER_DEFAULTS.depth,
-      priceHbar,
-      deepPriceHbar: Math.round(priceHbar * SELLER_DEFAULTS.deepMultiplier * 100) / 100,
-      payTo: "",
-      context: SELLER_DEFAULTS.context,
-    });
-  }
+  const supplier = supplierByLabel(normalized);
+  if (!supplier) throw new Error(`unknown supplier ${normalized}; register it from the seller page first`);
   const reader = publicClient();
   const wallet = walletClient();
   const account = deployerAccount();
-  const owner = (config.ens.sellerAddress || account.address) as Address;
+  const owner = (opts.owner || ownerOf(supplier) || config.ens.sellerAddress || account.address) as Address;
   const subregistry = subregistryAddress();
   const resolver = resolverAddress();
   const name = serviceName(normalized);
@@ -279,6 +291,7 @@ export async function resolveService(name: string): Promise<ServiceCard> {
     price: records[RECORD_KEYS.price],
     chain: records[RECORD_KEYS.chain],
     verified: records[RECORD_KEYS.verified] === "true",
+    upstream: records[RECORD_KEYS.upstream],
   });
 }
 

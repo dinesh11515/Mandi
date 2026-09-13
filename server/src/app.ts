@@ -8,11 +8,13 @@ import { config } from "./config";
 import { run, type AgentEvent } from "./buyer/agent";
 import { executeIntent, lookups } from "./buyer/executor";
 import { activatePolicy, describeActivation, getActivePolicy } from "./buyer/policy";
-import { directory, directorySource, labelOf, registerService, resolveService, scanProgress } from "./ens";
+import { buyer } from "./buyer/routes";
+import { directory, directorySource, labelOf, resolveService, scanProgress } from "./ens";
 import { registerReceiptHooks } from "./market/receipts";
 import { reliabilityFor, reliabilityIndex, reliabilitySource } from "./market/reliability";
 import { market } from "./market/routes";
-import { ActivationRequestSchema, PurchaseIntentSchema, SellerRegistrationSchema, WorldVerificationSchema } from "./types";
+import { registerSeller, sellersByOwner, sellersList } from "./sellers";
+import { ActivationRequestSchema, EvmAddressSchema, PurchaseIntentSchema, SellerRegistrationSchema, WorldRpRequestSchema, WorldVerificationSchema } from "./types";
 import { attestationLookup, getAttestation, signedWorldRequest, verifyAndAttest, verifyAttestation, worldConfig } from "./world";
 
 registerReceiptHooks();
@@ -28,6 +30,7 @@ const message = (err: unknown) =>
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/s", market);
+app.route("/", buyer);
 
 app.get("/directory", async (c) => {
   const capability = c.req.query("capability");
@@ -101,18 +104,33 @@ app.get("/world/config", (c) => {
   }
 });
 
-app.post("/sellers/register", async (c) => {
+app.get("/sellers", async (c) => {
   try {
-    const { label, depth, priceHbar } = SellerRegistrationSchema.parse(await c.req.json());
-    return c.json(await registerService(label, { depth, priceHbar }));
+    return c.json({ sellers: await sellersList() });
+  } catch (err) {
+    return c.json({ error: message(err) }, 503);
+  }
+});
+
+app.get("/sellers/by-owner/:address", async (c) => {
+  try {
+    return c.json({ sellers: await sellersByOwner(EvmAddressSchema.parse(c.req.param("address"))) });
   } catch (err) {
     return c.json({ error: message(err) }, 400);
   }
 });
 
-app.post("/world/rp-signature", (c) => {
+app.post("/sellers/register", async (c) => {
   try {
-    return c.json(signedWorldRequest());
+    return c.json(await registerSeller(SellerRegistrationSchema.parse(await c.req.json())));
+  } catch (err) {
+    return c.json({ error: message(err) }, 400);
+  }
+});
+
+app.post("/world/rp-signature", async (c) => {
+  try {
+    return c.json(signedWorldRequest(WorldRpRequestSchema.parse(await c.req.json())));
   } catch (err) {
     return c.json({ error: message(err) }, 400);
   }

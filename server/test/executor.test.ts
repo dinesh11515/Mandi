@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { acceptFilter, decide, type DecisionContext } from "../src/buyer/executor";
 import { SAMPLE_POLICY, type ServiceCard } from "../src/types";
 
@@ -14,17 +14,30 @@ const card: ServiceCard = {
 
 const intent = { supplier: card.name, route: "/assess" } as const;
 
+const SIGNER = "0x0000000000000000000000000000000000000001";
+const EXECUTOR = "0.0.10454930";
+
 function ctx(overrides: Partial<DecisionContext> = {}): DecisionContext {
   return {
     card,
     policy: { ...SAMPLE_POLICY, requireVerifiedFor: [] },
     policyHash: "a".repeat(64),
+    signer: SIGNER,
     ledger: { spentHbar: 0, calls: 0 },
     reliability: null,
     attestation: null,
+    funding: { depositedHbar: 5, spentHbar: 0, availableHbar: 5 },
     ...overrides,
   };
 }
+
+beforeAll(() => {
+  process.env.BUYER_ACCOUNT_ID = EXECUTOR;
+});
+
+afterEach(() => {
+  delete process.env.MANDI_UNFUNDED_OK;
+});
 
 describe("decide", () => {
   it("approves when every check passes", () => {
@@ -72,6 +85,41 @@ describe("decide", () => {
     const d = decide(intent, ctx({ card: { ...card, chain: "eip155:1" } }));
     expect(d.status).toBe("rejected");
     expect(d.reasons[0]).toMatch(/^identity:/);
+  });
+});
+
+describe("the funding check", () => {
+  it("passes when the signer has deposited more than the price", () => {
+    const d = decide(intent, ctx());
+    expect(d.status).toBe("approved");
+    expect(d.checks.find((c) => c.name === "funding")?.detail).toBe(
+      `deposited 5 HBAR, spent 0 HBAR, 5 HBAR available for ${SIGNER}`,
+    );
+  });
+
+  it("rejects when the deposit is already spent", () => {
+    const d = decide(intent, ctx({ funding: { depositedHbar: 0.5, spentHbar: 0.48, availableHbar: 0.02 } }));
+    expect(d.status).toBe("rejected");
+    expect(d.reasons).toEqual([`funding: deposited 0.5 HBAR, spent 0.48 HBAR, 0.02 HBAR available for ${SIGNER}`]);
+  });
+
+  it("names the executor account when the signer has deposited nothing", () => {
+    const d = decide(intent, ctx({ funding: { depositedHbar: 0, spentHbar: 0, availableHbar: 0 } }));
+    expect(d.status).toBe("rejected");
+    expect(d.reasons).toEqual([`funding: no HBAR deposited by ${SIGNER} to the executor ${EXECUTOR}`]);
+  });
+
+  it("rejects when the mirror node lookup failed", () => {
+    const d = decide(intent, ctx({ funding: null }));
+    expect(d.status).toBe("rejected");
+    expect(d.reasons[0]).toContain("could not be read from the mirror node");
+  });
+
+  it("is bypassed by MANDI_UNFUNDED_OK", () => {
+    process.env.MANDI_UNFUNDED_OK = "1";
+    const d = decide(intent, ctx({ funding: null }));
+    expect(d.status).toBe("approved");
+    expect(d.checks.find((c) => c.name === "funding")?.detail).toBe("funding check bypassed by MANDI_UNFUNDED_OK");
   });
 });
 

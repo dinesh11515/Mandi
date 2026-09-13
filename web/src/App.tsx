@@ -1,22 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Address } from "viem";
 import {
   activate,
   ensExplorer,
+  hashscanAccount,
   hashscanTx,
   loadActivation,
+  loadExecutor,
+  loadFunding,
   loadSuppliers,
+  mandate,
+  parsePolicy,
   sellerHref,
   STAGES,
   stream,
   type Activation,
   type AgentEvent,
   type Decision,
+  type Executor,
+  type Funding,
   type Policy,
   type Ranking,
   type SupplierRow,
 } from "./api";
-import { IconAlert, IconArrow, IconBolt, IconCheck, IconCopy, IconExternal, IconRefresh, IconShield, IconShieldCheck, IconX, Spinner } from "./icons";
+import { IconAlert, IconArrow, IconBolt, IconCheck, IconCoins, IconCopy, IconExternal, IconRefresh, IconShield, IconShieldCheck, IconWallet, IconX, Spinner } from "./icons";
 import { Topbar } from "./Shell";
+import { useWallet, type Wallet } from "./wallet";
 
 const PRESETS: Record<string, Policy> = {
   "Verified only": { budgetTotal: "1 HBAR", maxPerCall: "0.05 HBAR", requireVerifiedFor: ["financial"], minSuccessRate: 0.95, fallbackOnFailure: true },
@@ -27,10 +36,19 @@ const PRESETS: Record<string, Policy> = {
 
 const TASKS = ["Assess risk of Aave", "Assess risk of Compound", "Assess risk of Morpho", "Assess risk of Lido"];
 const STEPS = STAGES.filter((s) => s !== "done");
+const DEPOSIT_POLL_MS = 3_000;
+const DEPOSIT_WAIT_MS = 90_000;
 
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "n/a" : `${(v * 100).toFixed(1)}%`);
 const clock = (ts: number | null | undefined) => (ts ? new Date(ts).toLocaleTimeString([], { hour12: false }) : "never");
 const short = (s: string, n = 10) => (s.length > n * 2 ? `${s.slice(0, n)}…${s.slice(-6)}` : s);
+const hbar = (n: number) => `${Math.round(n * 1e8) / 1e8} HBAR`;
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const stamp = (ts: string | number) => {
+  const seconds = Number(String(ts).split(".")[0]);
+  return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toLocaleString() : String(ts);
+};
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function Copy({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -161,6 +179,192 @@ function Suppliers({ rows, loading, error, onRefresh }: { rows: SupplierRow[]; l
   );
 }
 
+function FundingCard({ wallet, refreshToken }: { wallet: Wallet; refreshToken: number }) {
+  const address = wallet.address;
+  const [executor, setExecutor] = useState<Executor | null>(null);
+  const [offline, setOffline] = useState<string | null>(null);
+  const [funding, setFunding] = useState<Funding | null>(null);
+  const [amount, setAmount] = useState("0.5");
+  const [depositing, setDepositing] = useState(false);
+  const [waiting, setWaiting] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    loadExecutor()
+      .then((found) => {
+        if (!alive.current) return;
+        setExecutor(found);
+        setOffline(found ? null : "executor funding unavailable — the executor account is not exposed yet");
+      })
+      .catch((err) => alive.current && setOffline(`executor funding unavailable — ${message(err)}`));
+  }, [refreshToken]);
+
+  const refreshFunding = useCallback(async () => {
+    if (!address) {
+      setFunding(null);
+      return null;
+    }
+    try {
+      const next = await loadFunding(address);
+      if (alive.current) setFunding(next);
+      return next;
+    } catch (err) {
+      if (alive.current) setError(message(err));
+      return null;
+    }
+  }, [address]);
+
+  useEffect(() => {
+    void refreshFunding();
+  }, [refreshFunding, refreshToken]);
+
+  const onDeposit = async () => {
+    if (!address || !executor) return;
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value < 0.01) {
+      setError("deposit at least 0.01 HBAR");
+      return;
+    }
+    setError(null);
+    setNote(null);
+    setTxHash(null);
+    setDepositing(true);
+    const before = funding?.depositedHbar ?? 0;
+    try {
+      const hash = await wallet.sendHbar(executor.evmAddress as Address, value);
+      if (!alive.current) return;
+      setTxHash(hash);
+      setDepositing(false);
+      setWaiting(true);
+      const deadline = Date.now() + DEPOSIT_WAIT_MS;
+      let credited = false;
+      while (alive.current && Date.now() < deadline && !credited) {
+        await sleep(DEPOSIT_POLL_MS);
+        const next = await refreshFunding();
+        credited = next !== null && next.depositedHbar > before + 1e-9;
+      }
+      if (!alive.current) return;
+      setWaiting(false);
+      setNote(credited ? `credited ${hbar(value)} to your balance with the executor` : "the deposit has not appeared on the mirror node yet; refresh in a moment");
+    } catch (err) {
+      if (!alive.current) return;
+      setDepositing(false);
+      setWaiting(false);
+      setError(message(err));
+    }
+  };
+
+  const busy = depositing || waiting;
+  const available = funding?.availableHbar ?? 0;
+
+  return (
+    <section className="card">
+      <div className="card-h">
+        <h2>
+          Funding <span className="sub">the executor spends your deposit, never its own</span>
+        </h2>
+        <span className={`pill ${available > 0 ? "ok" : ""}`}>
+          <IconCoins size={13} /> {hbar(available)} available
+        </span>
+      </div>
+      <div className="card-b stack-sm">
+        {offline && (
+          <div className="notice bad">
+            <IconAlert size={16} /> {offline}
+          </div>
+        )}
+        {executor && (
+          <dl className="kv">
+            <dt>executor</dt>
+            <dd className="row" style={{ gap: 4 }}>
+              <a className="mono" href={hashscanAccount(executor.accountId)} target="_blank" rel="noreferrer">
+                {executor.accountId} <IconExternal size={12} />
+              </a>
+              <Copy text={executor.accountId} />
+              <span className="dim num">{hbar(executor.balanceHbar)} on the account</span>
+            </dd>
+            <dt>evm address</dt>
+            <dd className="row" style={{ gap: 4 }}>
+              <span className="mono truncate" title={executor.evmAddress}>
+                {executor.evmAddress}
+              </span>
+              <Copy text={executor.evmAddress} />
+            </dd>
+          </dl>
+        )}
+        <div className="ledger">
+          <div>
+            <div className="label">deposited by you</div>
+            <div className="value">{funding ? hbar(funding.depositedHbar) : "–"}</div>
+          </div>
+          <div>
+            <div className="label">spent</div>
+            <div className="value">{funding ? hbar(funding.spentHbar) : "–"}</div>
+          </div>
+          <div>
+            <div className="label">available</div>
+            <div className="value">{funding ? hbar(funding.availableHbar) : "–"}</div>
+          </div>
+        </div>
+        <div className="depositrow">
+          <label className="field grow">
+            amount to deposit
+            <input className="text" type="number" min="0.01" step="0.1" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={!address || busy} aria-label="deposit amount in HBAR" />
+          </label>
+          <button className="btn primary" onClick={() => void onDeposit()} disabled={!address || !executor || busy}>
+            {busy ? <Spinner size={14} /> : <IconWallet size={15} />} {depositing ? "confirm in MetaMask" : waiting ? "waiting for the mirror node" : "Deposit from MetaMask"}
+          </button>
+          <button className="btn ghost sm" onClick={() => void refreshFunding()} disabled={!address || busy} title="refresh funding">
+            <IconRefresh size={14} /> refresh
+          </button>
+        </div>
+        {!address && <span className="dim">connect a wallet to deposit HBAR; MetaMask will switch to Hedera testnet (chain 296) for the transfer</span>}
+        {error && (
+          <div className="notice bad">
+            <IconAlert size={16} /> {error}
+          </div>
+        )}
+        {txHash && (
+          <div className="notice ok">
+            <IconCheck size={16} />
+            <span>
+              deposit sent ·{" "}
+              <a href={hashscanTx(txHash)} target="_blank" rel="noreferrer">
+                {short(txHash, 10)} <IconExternal size={12} />
+              </a>
+              {note ? ` · ${note}` : ""}
+            </span>
+          </div>
+        )}
+        {funding && funding.deposits.length > 0 && (
+          <ul className="deposits">
+            {funding.deposits.map((d) => (
+              <li key={d.txId}>
+                <span className="num">{hbar(d.amountHbar)}</span>
+                <span className="dim">{stamp(d.consensusTimestamp)}</span>
+                <a href={d.hashscan} target="_blank" rel="noreferrer">
+                  HashScan <IconExternal size={12} />
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+        {funding && funding.deposits.length === 0 && address && <span className="dim">no deposits from this wallet yet</span>}
+      </div>
+    </section>
+  );
+}
+
 function DecisionCard({ decision, ranking }: { decision: Decision; ranking: Ranking[] }) {
   const failed = decision.checks.filter((c) => !c.passed);
   const position = ranking.find((r) => r.name === decision.supplier)?.rank;
@@ -217,6 +421,8 @@ function Event({ ev, ranking }: { ev: AgentEvent; ranking: Ranking[] }) {
       </a>
     ) : null;
   const body = (ev.body ?? null) as Body | null;
+  const rejections = Array.isArray(ev.rejections) ? (ev.rejections as { supplier: string; reasons: string[] }[]) : [];
+  const unfunded = rejections.some((r) => r.reasons.some((reason) => /deposit/i.test(reason)));
   return (
     <div className={`ev ${tone}`}>
       <div className="node">{tone === "ok" ? <IconCheck size={11} /> : tone === "bad" ? <IconX size={11} /> : <IconArrow size={11} />}</div>
@@ -334,15 +540,16 @@ function Event({ ev, ranking }: { ev: AgentEvent; ranking: Ranking[] }) {
               {typeof ev.supplier === "string" && <span className="muted">served by {ev.supplier}</span>}
             </div>
             {typeof ev.error === "string" && <div className="muted">{ev.error}</div>}
-            {Array.isArray(ev.rejections) && (
+            {rejections.length > 0 && (
               <ul>
-                {(ev.rejections as { supplier: string; reasons: string[] }[]).map((r) => (
+                {rejections.map((r) => (
                   <li key={r.supplier}>
                     <b>{r.supplier}</b>: {r.reasons.join(" · ")}
                   </li>
                 ))}
               </ul>
             )}
+            {unfunded && <div className="muted">Deposit HBAR to the executor in the funding card, then run the task again.</div>}
           </div>
         )}
       </div>
@@ -371,6 +578,7 @@ function Stepper({ events, running }: { events: AgentEvent[]; running: boolean }
 }
 
 export function App() {
+  const wallet = useWallet();
   const [rows, setRows] = useState<SupplierRow[]>([]);
   const [rowsError, setRowsError] = useState<string | null>(null);
   const [rowsLoading, setRowsLoading] = useState(false);
@@ -384,6 +592,7 @@ export function App() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [fundingToken, setFundingToken] = useState(0);
   const cancelRun = useRef<(() => void) | null>(null);
   const ranking = useMemo(() => (events.find((e) => e.stage === "preference")?.ranking as Ranking[] | undefined) ?? [], [events]);
 
@@ -393,7 +602,7 @@ export function App() {
     try {
       setRows(await loadSuppliers());
     } catch (err) {
-      setRowsError(err instanceof Error ? err.message : String(err));
+      setRowsError(message(err));
     } finally {
       setRowsLoading(false);
     }
@@ -416,11 +625,22 @@ export function App() {
 
   const onActivate = async () => {
     setActivationError(null);
+    const signer = wallet.address;
+    if (!signer) {
+      setActivationError("connect a wallet to sign the mandate");
+      return;
+    }
     setActivating(true);
     try {
-      setActivation(await activate(JSON.parse(policyText)));
+      const signed = mandate(parsePolicy(policyText));
+      const signature = await wallet.signMessage(signed.message);
+      const result = await activate({ policy: signed.policy, expiry: signed.expiry, signature, signer });
+      setActivation(result);
+      setFundingToken((n) => n + 1);
+      if (result.policyHash !== signed.policyHash)
+        setActivationError(`this console signed policy ${short(signed.policyHash, 8)} but the executor stored ${short(result.policyHash, 8)}; the canonical form drifted between the two`);
     } catch (err) {
-      setActivationError(err instanceof Error ? err.message : String(err));
+      setActivationError(message(err));
     } finally {
       setActivating(false);
     }
@@ -442,10 +662,12 @@ export function App() {
         setRunError(error);
         void loadActivation(activation.policyHash).then(setActivation).catch(() => undefined);
         void refresh();
+        setFundingToken((n) => n + 1);
       },
     );
   };
 
+  const connected = wallet.address !== null;
   const topicUrl = rows[0]?.reliability.source?.hashscan ?? null;
   const receipts = rows.reduce((n, r) => n + r.reliability.calls, 0);
   const budget = activation ? Number.parseFloat(activation.policy.budgetTotal) : Number.NaN;
@@ -453,7 +675,7 @@ export function App() {
 
   return (
     <>
-      <Topbar topicUrl={topicUrl} />
+      <Topbar topicUrl={topicUrl} wallet={wallet} />
       <main className="page">
         <div className="hero">
           <div>
@@ -467,6 +689,22 @@ export function App() {
             <span className="pill">proof · HCS</span>
           </div>
         </div>
+
+        <ol className="how">
+          <li>
+            <b>1</b> connect your wallet
+          </li>
+          <li>
+            <b>2</b> sign the policy
+          </li>
+          <li>
+            <b>3</b> deposit HBAR
+          </li>
+          <li>
+            <b>4</b> run the task
+          </li>
+          <li className="note">the executor spends only your deposit, and only when every check passes</li>
+        </ol>
 
         <div className="kpis">
           <div className="kpi">
@@ -494,11 +732,11 @@ export function App() {
         <Suppliers rows={rows} loading={rowsLoading} error={rowsError} onRefresh={refresh} />
 
         <div className="grid">
-          <div className="stack sticky">
+          <div className="stack">
             <section className="card">
               <div className="card-h">
                 <h2>
-                  Policy <span className="sub">signed by the human, enforced by the executor</span>
+                  Policy <span className="sub">signed by your wallet, enforced by the executor</span>
                 </h2>
                 <span className={`pill ${activation ? "ok" : ""}`}>{activation ? "active" : "not active"}</span>
               </div>
@@ -512,8 +750,8 @@ export function App() {
                 </div>
                 <textarea className="code" value={policyText} onChange={(e) => setPolicyText(e.target.value)} spellCheck={false} aria-label="policy json" />
                 <div className="row between">
-                  <button className="btn primary" onClick={onActivate} disabled={activating}>
-                    {activating ? <Spinner size={14} /> : <IconShieldCheck size={15} />} Activate policy
+                  <button className="btn primary" onClick={() => void onActivate()} disabled={activating || !connected}>
+                    {activating ? <Spinner size={14} /> : <IconShieldCheck size={15} />} Sign & activate
                   </button>
                   {activation && (
                     <span className="row" style={{ gap: 4 }}>
@@ -522,6 +760,7 @@ export function App() {
                     </span>
                   )}
                 </div>
+                {!connected && <span className="dim">connect a wallet to sign the mandate</span>}
                 {activationError && (
                   <div className="notice bad">
                     <IconAlert size={16} /> <span style={{ whiteSpace: "pre-wrap" }}>{activationError}</span>
@@ -542,7 +781,12 @@ export function App() {
                       )}
                     </dd>
                     <dt>signer</dt>
-                    <dd className="mono truncate">{activation.signer}</dd>
+                    <dd className="row" style={{ gap: 6 }}>
+                      <span className="mono truncate" title={activation.signer}>
+                        {activation.signer}
+                      </span>
+                      {connected && activation.signer.toLowerCase() === wallet.address?.toLowerCase() && <span className="pill ok">this wallet</span>}
+                    </dd>
                     <dt>expires</dt>
                     <dd>{new Date(activation.expiry * 1000).toLocaleString()}</dd>
                   </dl>
@@ -563,6 +807,8 @@ export function App() {
                 </div>
               </div>
             </section>
+
+            <FundingCard wallet={wallet} refreshToken={fundingToken} />
 
             <section className="card">
               <div className="card-h">
@@ -586,7 +832,7 @@ export function App() {
                   <button className="btn primary" onClick={onRun} disabled={!activation || running}>
                     {running ? <Spinner size={14} /> : <IconBolt size={15} />} {running ? "running" : "Run agent"}
                   </button>
-                  {!activation && <span className="dim">activate a policy first</span>}
+                  {!activation && <span className="dim">sign and activate a policy first</span>}
                 </div>
               </div>
             </section>
@@ -616,7 +862,7 @@ export function App() {
             <Stepper events={events} running={running} />
             <div className="log" ref={logRef} role="log" aria-live="polite" aria-label="agent pipeline events" tabIndex={0}>
               {events.length === 0 && !runError && (
-                <div className="empty">Activate a policy and run a task. Discovery, eligibility, preference, authorization, payment and receipt will appear here with links to HashScan.</div>
+                <div className="empty">Sign a policy, deposit HBAR and run a task. Discovery, eligibility, preference, authorization, payment and receipt will appear here with links to HashScan.</div>
               )}
               {events.map((ev, i) => (
                 <Event key={i} ev={ev} ranking={ranking} />

@@ -10,9 +10,14 @@ process.env.WORLD_RP_ID = "rp_test";
 process.env.SELLER_ACCOUNT_ID = "0.0.1234";
 process.env.ATTESTATION_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mandi-")), "attestations.json");
 
-const { attestationLookup, attestationMessage, getAttestation, issueAttestation, verifyAndAttest, verifyAttestation } = await import("../src/world");
+const seller = privateKeyToAccount(generatePrivateKey());
+process.env.SELLER_EVM_ADDRESS = seller.address;
 
-const wallet = privateKeyToAccount(generatePrivateKey()).address;
+const { attestationLookup, attestationMessage, getAttestation, issueAttestation, signedWorldRequest, verifyAndAttest, verifyAttestation, worldConfig } =
+  await import("../src/world");
+
+const wallet = seller.address;
+const stranger = privateKeyToAccount(generatePrivateKey()).address;
 
 function fakeFetch(body: unknown, ok = true): typeof fetch {
   return (async () => new Response(JSON.stringify(body), { status: ok ? 200 : 400 })) as unknown as typeof fetch;
@@ -82,6 +87,24 @@ describe("verifyAndAttest", () => {
     await expect(verifyAndAttest({ label: "risk-basic", wallet, idkitResponse: orb }, { fetch: fakeFetch({ success: true, nullifier: "0xnull-orb" }) })).rejects.toThrow(
       "expected a selfie credential",
     );
+  });
+
+  it("rejects a wallet that does not own the name, without calling World", async () => {
+    const exploding = (() => {
+      throw new Error("World must not be called");
+    }) as unknown as typeof fetch;
+    await expect(
+      verifyAndAttest({ label: "risk-basic", wallet: stranger, idkitResponse: proof(stranger, "0xnull-4") }, { fetch: exploding }),
+    ).rejects.toThrow(`${stranger} does not own risk-basic.mandi.eth`);
+    expect(() => signedWorldRequest({ label: "risk-basic", wallet: stranger })).toThrow("does not own");
+  });
+
+  it("advertises the parent name and explorer without a wallet", () => {
+    const cfg = worldConfig();
+    expect(cfg.parent).toBe("mandi.eth");
+    expect(cfg.explorer).toContain("explorer.ens.dev");
+    expect(cfg.labels).toContain("risk-basic");
+    expect("wallet" in cfg).toBe(false);
   });
 
   it("rejects a World failure and a nullifier already bound to another name", async () => {

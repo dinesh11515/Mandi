@@ -2,6 +2,8 @@ import { decodePaymentResponseHeader } from "@x402/fetch";
 import { paidFetch } from "../src/buyer/executor";
 import { allSuppliers, config } from "../src/config";
 
+process.env.MANDI_UNFUNDED_OK ??= "1";
+
 const rounds = Number(process.argv[2] ?? 3);
 const protocol = process.argv[3] ?? "aave";
 const only = process.argv[4]?.split(",").filter(Boolean);
@@ -10,6 +12,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Row = { supplier: string; calls: number; fulfilled: number; settled: number; totalHbar: number; latencyMs: number[] };
 
 async function main() {
+  console.log("MANDI_UNFUNDED_OK=1: this script pays with the executor's own key, so the deposit check is bypassed");
   const targets = allSuppliers().filter((s) => !only || only.includes(s.label));
   const rows = new Map<string, Row>(targets.map((s) => [s.label, { supplier: s.label, calls: 0, fulfilled: 0, settled: 0, totalHbar: 0, latencyMs: [] }]));
   const fetchPaid = paidFetch();

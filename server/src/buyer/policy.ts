@@ -45,6 +45,7 @@ export type ActivePolicy = {
 const active = new Map<string, ActivePolicy>();
 
 export async function signMandate(hash: string, expiry: number): Promise<{ signer: Address; signature: Hex }> {
+  if (!process.env.HUMAN_KEY) throw new Error("sign the mandate with a wallet: HUMAN_KEY is not configured");
   const account = privateKeyToAccount(requireEnv("HUMAN_KEY") as Hex);
   const signature = await account.signMessage({ message: mandateMessage(hash, expiry) });
   return { signer: account.address, signature };

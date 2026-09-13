@@ -7,12 +7,16 @@ process.env.SELLER_ACCOUNT_ID = "0.0.1234";
 process.env.SELLERS_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mandi-sellers-")), "sellers.json");
 
 const { allSuppliers, assertSellerLabel, supplierByLabel, upsertSupplier } = await import("../src/config");
-const { registerService } = await import("../src/ens");
+const { registerService, serviceRecords } = await import("../src/ens");
 
 describe("seller listings", () => {
   it("rejects a bad label before touching chain", async () => {
     expect(() => assertSellerLabel("bad_label")).toThrow("lowercase");
     await expect(registerService("bad_label")).rejects.toThrow("lowercase");
+  });
+
+  it("refuses to mint a label no supplier row claims", async () => {
+    await expect(registerService("ghost-risk")).rejects.toThrow("unknown supplier ghost-risk");
   });
 
   it("upserts a new seller so the x402 handler can find it", () => {
@@ -35,6 +39,30 @@ describe("seller listings", () => {
       upsertSupplier({ label: "free-risk", capability: "financial-risk", depth: "pro", priceHbar: 0, deepPriceHbar: 0, payTo: "", context: "" }),
     ).toThrow();
     expect(supplierByLabel("free-risk")).toBeUndefined();
+  });
+
+  it("writes mandi:upstream only for a seller that published one", () => {
+    upsertSupplier({
+      label: "quiet-risk",
+      capability: "financial-risk",
+      depth: "basic",
+      priceHbar: 0.01,
+      deepPriceHbar: 0.02,
+      payTo: "0.0.7",
+      context: "no upstream",
+    });
+    expect(serviceRecords("quiet-risk")["mandi:upstream"]).toBeUndefined();
+    upsertSupplier({
+      label: "loud-risk",
+      capability: "financial-risk",
+      depth: "basic",
+      priceHbar: 0.01,
+      deepPriceHbar: 0.02,
+      payTo: "0.0.7",
+      context: "has upstream",
+      upstream: "https://loud.example/assess",
+    });
+    expect(serviceRecords("loud-risk")["mandi:upstream"]).toBe("https://loud.example/assess");
   });
 
   it("skips a malformed row in the sellers file instead of serving it", () => {

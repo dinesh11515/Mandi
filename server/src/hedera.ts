@@ -89,3 +89,7 @@ export function hashscanTx(txId: string): string {
 export function hashscanTopic(topicId: string): string {
   return `https://hashscan.io/${config.hedera.network}/topic/${topicId}`;
 }
+
+export function hashscanAccount(accountId: string): string {
+  return `https://hashscan.io/${config.hedera.network}/account/${accountId}`;
+}
