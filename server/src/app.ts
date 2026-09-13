@@ -155,7 +155,7 @@ app.post("/world/verify", async (c) => {
 app.get("/attestation/:name", async (c) => {
   try {
     const record = getAttestation(c.req.param("name"));
-    if (!record) return c.json({ error: "no attestation for that name" }, 404);
+    if (!record) return c.json({ valid: false, expiry: 0, reason: "no verifier attestation on file", attestation: null });
     return c.json({ ...(await verifyAttestation(record)), attestation: record });
   } catch (err) {
     return c.json({ error: message(err) }, 500);
