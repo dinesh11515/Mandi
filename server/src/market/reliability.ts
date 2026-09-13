@@ -1,6 +1,7 @@
 import { config } from "../config";
 import { parseHbar } from "../hbar";
 import { hashscanTopic, mirrorMessages, type HcsMessage } from "../hedera";
+import { HbarAmountSchema } from "../types";
 
 export type SupplierReliability = {
   supplier: string;
@@ -40,7 +41,8 @@ export function aggregate(messages: HcsMessage[]): Map<string, SupplierReliabili
     else entry.failed += 1;
     if (m.settled === true) {
       entry.settled += 1;
-      if (typeof m.amountHbar === "string") entry.cost += parseHbar(m.amountHbar);
+      const amount = HbarAmountSchema.safeParse(m.amountHbar);
+      if (amount.success) entry.cost += parseHbar(amount.data);
     }
     if (typeof m.latencyMs === "number") {
       entry.latency += m.latencyMs;

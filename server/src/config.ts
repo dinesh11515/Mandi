@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
+import { SupplierSchema, type Depth, type Supplier } from "./types";
+
+export type { Depth, Supplier } from "./types";
 
 if (!process.env.VITEST) {
   try {
@@ -18,24 +21,22 @@ export function requireEnv(name: string): string {
 
 const port = Number(env("PORT") || 3000);
 
-export type Depth = "basic" | "pro";
-
-export type Supplier = {
-  label: string;
-  capability: string;
-  depth: Depth;
-  priceHbar: number;
-  deepPriceHbar: number;
-  payTo: string;
-  context: string;
-};
-
 const sellerAccount = () => env("SELLER_ACCOUNT_ID");
+
+export const CAPABILITY = "financial-risk";
+
+export const SELLER_DEFAULTS = {
+  capability: CAPABILITY,
+  depth: "pro" as Depth,
+  priceHbar: 0.03,
+  deepMultiplier: 2,
+  context: "Protocol risk assessment from TVL, utilization and liquidity. Newly registered operator.",
+};
 
 export const SUPPLIERS: Supplier[] = [
   {
     label: "risk-basic",
-    capability: "financial-risk",
+    capability: CAPABILITY,
     depth: "basic",
     priceHbar: 0.02,
     deepPriceHbar: 0.04,
@@ -44,7 +45,7 @@ export const SUPPLIERS: Supplier[] = [
   },
   {
     label: "risk-pro",
-    capability: "financial-risk",
+    capability: CAPABILITY,
     depth: "pro",
     priceHbar: 0.05,
     deepPriceHbar: 0.1,
@@ -53,7 +54,7 @@ export const SUPPLIERS: Supplier[] = [
   },
   {
     label: "risk-pro-2",
-    capability: "financial-risk",
+    capability: CAPABILITY,
     depth: "pro",
     priceHbar: 0.04,
     deepPriceHbar: 0.08,
@@ -67,7 +68,9 @@ const extrasFile = () =>
 
 function loadExtras(): Supplier[] {
   try {
-    return JSON.parse(fs.readFileSync(extrasFile(), "utf8")) as Supplier[];
+    const rows: unknown = JSON.parse(fs.readFileSync(extrasFile(), "utf8"));
+    if (!Array.isArray(rows)) return [];
+    return rows.filter((row): row is Supplier => SupplierSchema.safeParse(row).success);
   } catch {
     return [];
   }
@@ -96,6 +99,7 @@ export function upsertSupplier(row: Supplier): Supplier {
   if (SUPPLIERS.some((s) => s.label === label)) return SUPPLIERS.find((s) => s.label === label)!;
   const next = { ...row, label, payTo: row.payTo || sellerAccount() };
   if (!next.payTo) throw new Error("missing env SELLER_ACCOUNT_ID");
+  SupplierSchema.parse(next);
   const extras = loadExtras().filter((s) => s.label !== label);
   extras.push(next);
   fs.mkdirSync(path.dirname(extrasFile()), { recursive: true });
@@ -122,7 +126,11 @@ export const config = {
   },
   x402: {
     network: "hedera:testnet" as const,
+    asset: "0.0.0",
     facilitatorUrl: env("X402_FACILITATOR_URL") || "https://api.testnet.blocky402.com",
+  },
+  world: {
+    action: env("WORLD_ACTION") || "mandi-supplier-accreditation",
   },
   ens: {
     rpcUrl: env("SEPOLIA_RPC_URL"),

@@ -1,14 +1,16 @@
 import { Hono } from "hono";
 import { config, supplierByLabel } from "../config";
 import { assess } from "./assess";
-import { x402Gate } from "./x402";
+import { routeInfo, x402Gate } from "./x402";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const market = new Hono();
 
 market.use("/:label/*", async (c, next) => {
-  if (!supplierByLabel(c.req.param("label"))) return c.json({ error: `unknown supplier ${c.req.param("label")}` }, 404);
+  const label = c.req.param("label");
+  if (!supplierByLabel(label)) return c.json({ error: `unknown supplier ${label}` }, 404);
+  if (!routeInfo(c.req.path)) return c.json({ error: `no priced route at ${c.req.path}` }, 404);
   await next();
 });
 

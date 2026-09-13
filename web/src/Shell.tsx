@@ -2,9 +2,9 @@ import { useEffect, useState, type ReactNode } from "react";
 import { API, ensExplorer, sellerHref } from "./api";
 import { IconExternal, IconShield, Logo } from "./icons";
 
-export type Health = "checking" | "ok" | "down";
+type Health = "checking" | "ok" | "down";
 
-export function useHealth(): Health {
+function useHealth(): Health {
   const [health, setHealth] = useState<Health>("checking");
   useEffect(() => {
     let alive = true;
@@ -26,11 +26,11 @@ export function Topbar({ topicUrl, right }: { topicUrl?: string | null; right?: 
   const health = useHealth();
   return (
     <header className="topbar">
-      <a href="/" className="brand" style={{ color: "inherit", textDecoration: "none" }}>
+      <a href="/" className="brand">
         <Logo />
         Mandi <small>procurement for agents</small>
       </a>
-      <span className={`pill ${health === "ok" ? "ok" : health === "down" ? "bad" : ""}`}>
+      <span className={`pill ${health === "ok" ? "ok" : health === "down" ? "bad" : ""}`} role="status">
         <span className="dot" />
         {health === "ok" ? "executor online" : health === "down" ? "executor unreachable" : "checking"}
       </span>

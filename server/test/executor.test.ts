@@ -12,7 +12,7 @@ const card: ServiceCard = {
   verified: false,
 };
 
-const intent = { supplier: card.name, route: "/assess" };
+const intent = { supplier: card.name, route: "/assess" } as const;
 
 function ctx(overrides: Partial<DecisionContext> = {}): DecisionContext {
   return {
@@ -49,7 +49,7 @@ describe("decide", () => {
   it("rejects below minSuccessRate and names the sample size", () => {
     const d = decide(intent, ctx({ reliability: { calls: 10, fulfilled: 9, failed: 1, successRate: 0.9, sampleSize: 10 } }));
     expect(d.status).toBe("rejected");
-    expect(d.reasons[0]).toContain("success rate 90.0% over 10 settled calls vs minSuccessRate 95%");
+    expect(d.reasons[0]).toContain("success rate 90.0% over 10 anchored calls vs minSuccessRate 95%");
   });
 
   it("does not enforce minSuccessRate without history", () => {

@@ -40,13 +40,6 @@ export const IconShieldCheck = (p: Props) => (
   </svg>
 );
 
-export const IconLink = (p: Props) => (
-  <svg {...base(p)}>
-    <path d="M10 14a4 4 0 005.66 0l3-3a4 4 0 00-5.66-5.66l-1 1" />
-    <path d="M14 10a4 4 0 00-5.66 0l-3 3a4 4 0 005.66 5.66l1-1" />
-  </svg>
-);
-
 export const IconExternal = (p: Props) => (
   <svg {...base(p)}>
     <path d="M14 4h6v6M20 4l-9 9" />

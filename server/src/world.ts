@@ -9,7 +9,7 @@ import { canonicalize, sha256 } from "./buyer/policy";
 import { allSuppliers, config, requireEnv, supplierByLabel } from "./config";
 import { deployerAccount, RECORD_KEYS, serviceName, setTextRecord } from "./ens";
 
-export const WORLD_ACTION = process.env.WORLD_ACTION || "mandi-supplier-accreditation";
+export const WORLD_ACTION = config.world.action;
 export const ATTESTATION_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 export type RpContext = { rp_id: string; nonce: string; created_at: number; expires_at: number; signature: string };
@@ -161,8 +161,4 @@ export async function verifyAndAttest(
     ensError = err instanceof Error ? err.message : String(err);
   }
   return { attestation, ensTx, ensError };
-}
-
-export function worldConfigured(): boolean {
-  return Boolean(process.env.WORLD_RP_ID && process.env.WORLD_SIGNING_KEY && process.env.VERIFIER_KEY && config.publicUrl);
 }

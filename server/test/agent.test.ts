@@ -39,6 +39,7 @@ type Options = {
   reliability?: Record<string, Reliability>;
   attestations?: string[];
   failing?: string[];
+  throwing?: string[];
 };
 
 function deps(opts: Options): { deps: AgentDeps; paid: string[] } {
@@ -58,6 +59,7 @@ function deps(opts: Options): { deps: AgentDeps; paid: string[] } {
       attestation: async (name) => attestationOf(name),
       execute: async (intent: PurchaseIntent): Promise<IntentOutcome> => {
         const c = all.find((x) => x.name === intent.supplier)!;
+        if (opts.throwing?.includes(c.name)) throw new Error(`${c.name} could not be reached`);
         const decision = decide(intent, {
           card: c,
           policy: entry.policy,
@@ -165,6 +167,19 @@ describe("run", () => {
     expect(done.outcome).toBe("NO_ELIGIBLE_SUPPLIER");
     expect((done.rejections as unknown[]).length).toBe(3);
     expect(events.some((e) => e.stage === "payment")).toBe(false);
+  });
+
+  it("keeps going when one supplier's execution throws", async () => {
+    const { done, paid, events } = await collect({ policy: open, throwing: [cards.basic.name] });
+    expect(paid).toEqual([cards.pro2.name]);
+    expect(done.outcome).toBe("FULFILLED");
+    expect(events.some((e) => e.stage === "authorization" && typeof e.error === "string")).toBe(true);
+  });
+
+  it("reports every supplier that could not be reached", async () => {
+    const { done } = await collect({ policy: open, throwing: Object.values(cards).map((c) => c.name) });
+    expect(done.outcome).toBe("NO_ELIGIBLE_SUPPLIER");
+    expect((done.rejections as { reasons: string[] }[]).every((r) => r.reasons[0]!.startsWith("execution:"))).toBe(true);
   });
 
   it("stops after a failure when fallback is disabled", async () => {

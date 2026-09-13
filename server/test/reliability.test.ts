@@ -32,4 +32,12 @@ describe("aggregate", () => {
     expect(index.get("risk-basic")).toMatchObject({ calls: 1, fulfilled: 1, successRate: 1, avgCostHbar: 0.02 });
     expect(index.size).toBe(2);
   });
+
+  it("counts a receipt whose amount is unreadable without losing the whole index", () => {
+    const index = aggregate([
+      { ...receipt("risk-basic", true, true, 50, 1000), amountHbar: "not an amount" },
+      receipt("risk-basic", true, true, 50, 2000),
+    ]);
+    expect(index.get("risk-basic")).toMatchObject({ calls: 2, settled: 2, avgCostHbar: 0.01 });
+  });
 });

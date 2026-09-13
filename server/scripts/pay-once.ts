@@ -1,9 +1,9 @@
 import { decodePaymentResponseHeader } from "@x402/fetch";
 import { paidFetch } from "../src/buyer/executor";
-import { config } from "../src/config";
+import { allSuppliers, config } from "../src/config";
 import { hashscanTx } from "../src/hedera";
 
-const label = process.argv[2] ?? "risk-basic";
+const label = process.argv[2] ?? allSuppliers()[0]!.label;
 const protocol = process.argv[3] ?? "aave";
 const route = process.argv[4] === "deep" ? "assess/deep" : "assess";
 

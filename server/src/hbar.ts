@@ -7,7 +7,9 @@ export function parseHbar(amount: string): number {
 }
 
 export function formatHbar(hbar: number): string {
-  return `${hbar} HBAR`;
+  if (!Number.isFinite(hbar)) throw new Error(`invalid HBAR amount: ${hbar}`);
+  const fixed = hbar.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+  return `${fixed} HBAR`;
 }
 
 export function toTinybar(hbar: number): bigint {

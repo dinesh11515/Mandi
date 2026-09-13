@@ -5,6 +5,7 @@ process.env.MANDI_FAIL = "risk-pro:error,risk-pro-2:timeout";
 process.env.UPSTREAM_TIMEOUT_MS = "10";
 
 const { handle } = await import("../src/market/routes");
+const { priceHbar, routeInfo } = await import("../src/market/x402");
 
 describe("supplier handler", () => {
   it("serves an assessment with a latency value", async () => {
@@ -24,5 +25,19 @@ describe("supplier handler", () => {
     const started = Date.now();
     expect((await handle("risk-pro-2", "aave", false)).status).toBe(504);
     expect(Date.now() - started).toBeGreaterThanOrEqual(2000);
+  });
+});
+
+describe("routeInfo", () => {
+  it("prices the two assess routes and nothing else", () => {
+    expect(routeInfo("/s/risk-basic/assess")).toMatchObject({ deep: false, route: "/assess" });
+    expect(routeInfo("/s/risk-basic/assess/deep")).toMatchObject({ deep: true, route: "/assess/deep" });
+    expect(routeInfo("/s/risk-basic/assess/typo")).toBeUndefined();
+    expect(routeInfo("/s/unknown-seller/assess")).toBeUndefined();
+  });
+
+  it("charges the deep price on the deep route", () => {
+    expect(priceHbar(routeInfo("/s/risk-basic/assess")!)).toBe(0.02);
+    expect(priceHbar(routeInfo("/s/risk-basic/assess/deep")!)).toBe(0.04);
   });
 });

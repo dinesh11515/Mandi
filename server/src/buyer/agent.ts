@@ -1,6 +1,7 @@
+import { CAPABILITY } from "../config";
 import { directory, resolveService } from "../ens";
 import { parseHbar } from "../hbar";
-import type { PurchaseIntent, ServiceCard } from "../types";
+import type { PurchaseIntent, Route, ServiceCard } from "../types";
 import { executeIntent, lookups, type Attestation, type IntentOutcome, type Reliability } from "./executor";
 import { getActivePolicy, type ActivePolicy } from "./policy";
 
@@ -28,15 +29,15 @@ export const defaultDeps: AgentDeps = {
 
 const KNOWN_PROTOCOLS = ["aave", "compound", "uniswap", "lido", "maker", "curve", "morpho", "spark", "balancer", "sushi"];
 
-export function planTask(task: string): { capability: string; protocol: string; route: string; rationale: string } {
+export function planTask(task: string): { capability: string; protocol: string; route: Route; rationale: string } {
   const text = task.toLowerCase();
   const protocol = KNOWN_PROTOCOLS.find((p) => text.includes(p)) ?? text.match(/[a-z][a-z0-9-]+/g)?.at(-1) ?? "aave";
   const route = /\b(deep|thorough|detailed)\b/.test(text) ? "/assess/deep" : "/assess";
   return {
-    capability: "financial-risk",
+    capability: CAPABILITY,
     protocol,
     route,
-    rationale: `task mentions ${/risk|assess|safe|exposure/.test(text) ? "risk assessment" : "a protocol"}; only capability offered is financial-risk`,
+    rationale: `task mentions ${/risk|assess|safe|exposure/.test(text) ? "risk assessment" : "a protocol"}; only capability offered is ${CAPABILITY}`,
   };
 }
 
@@ -103,7 +104,15 @@ export async function* run(task: string, policyHash: string, deps: AgentDeps = d
   const rejections: { supplier: string; reasons: string[] }[] = [];
   let approved = 0;
   for (const { card } of ranked) {
-    const outcome = await deps.execute({ supplier: card.name, route: plan.route, protocol: plan.protocol, policyHash });
+    let outcome: IntentOutcome;
+    try {
+      outcome = await deps.execute({ supplier: card.name, route: plan.route, protocol: plan.protocol, policyHash });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      rejections.push({ supplier: card.name, reasons: [`execution: ${reason}`] });
+      yield event("authorization", { supplier: card.name, error: reason });
+      continue;
+    }
     yield event("authorization", { supplier: card.name, decision: outcome.decision, hcsTx: outcome.hcsTx });
     if (outcome.decision.status !== "approved" || !outcome.payment) {
       rejections.push({ supplier: card.name, reasons: outcome.decision.reasons });

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   activate,
   ensExplorer,
+  hashscanTx,
   loadActivation,
   loadSuppliers,
   sellerHref,
+  STAGES,
   stream,
   type Activation,
   type AgentEvent,
@@ -24,13 +26,11 @@ const PRESETS: Record<string, Policy> = {
 };
 
 const TASKS = ["Assess risk of Aave", "Assess risk of Compound", "Assess risk of Morpho", "Assess risk of Lido"];
-const STAGES = ["discovery", "resolution", "preference", "authorization", "payment", "receipt"] as const;
+const STEPS = STAGES.filter((s) => s !== "done");
 
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "n/a" : `${(v * 100).toFixed(1)}%`);
 const clock = (ts: number | null | undefined) => (ts ? new Date(ts).toLocaleTimeString([], { hour12: false }) : "never");
 const short = (s: string, n = 10) => (s.length > n * 2 ? `${s.slice(0, n)}…${s.slice(-6)}` : s);
-const hbar = (v: string | number) => (typeof v === "number" ? `${v} HBAR` : v);
-const hashscanTx = (id: string) => `https://hashscan.io/testnet/transaction/${id.replace("@", "-").replace(/\.(\d+)$/, "-$1")}`;
 
 function Copy({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -333,6 +333,7 @@ function Event({ ev, ranking }: { ev: AgentEvent; ranking: Ranking[] }) {
               <b>{String(ev.outcome).replaceAll("_", " ")}</b>
               {typeof ev.supplier === "string" && <span className="muted">served by {ev.supplier}</span>}
             </div>
+            {typeof ev.error === "string" && <div className="muted">{ev.error}</div>}
             {Array.isArray(ev.rejections) && (
               <ul>
                 {(ev.rejections as { supplier: string; reasons: string[] }[]).map((r) => (
@@ -356,7 +357,7 @@ function Stepper({ events, running }: { events: AgentEvent[]; running: boolean }
   const failed = done && done.outcome !== "FULFILLED";
   return (
     <div className="stepper" aria-label="pipeline stages">
-      {STAGES.map((s) => {
+      {STEPS.map((s) => {
         const state = seen.has(s) ? (running && last === s ? "active" : "done") : "";
         return (
           <div key={s} className={`step ${state} ${failed && s === "authorization" && !seen.has("payment") ? "failed" : ""}`}>
@@ -382,6 +383,8 @@ export function App() {
   const [task, setTask] = useState(TASKS[0]!);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const cancelRun = useRef<(() => void) | null>(null);
   const ranking = useMemo(() => (events.find((e) => e.stage === "preference")?.ranking as Ranking[] | undefined) ?? [], [events]);
 
   const refresh = async () => {
@@ -398,12 +401,13 @@ export function App() {
 
   useEffect(() => {
     void refresh();
+    return () => cancelRun.current?.();
   }, []);
 
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [events.length]);
+  }, [events.length, runError]);
 
   const applyPreset = (name: string) => {
     setPreset(name);
@@ -424,14 +428,18 @@ export function App() {
 
   const onRun = () => {
     if (!activation) return;
+    cancelRun.current?.();
     setEvents([]);
+    setRunError(null);
     setRunning(true);
-    stream(
+    cancelRun.current = stream(
       task,
       activation.policyHash,
       (ev) => setEvents((prev) => [...prev, ev]),
-      () => {
+      (error) => {
+        cancelRun.current = null;
         setRunning(false);
+        setRunError(error);
         void loadActivation(activation.policyHash).then(setActivation).catch(() => undefined);
         void refresh();
       },
@@ -440,8 +448,8 @@ export function App() {
 
   const topicUrl = rows[0]?.reliability.source?.hashscan ?? null;
   const receipts = rows.reduce((n, r) => n + r.reliability.calls, 0);
-  const budget = activation ? parseFloat(activation.policy.budgetTotal) : null;
-  const remaining = activation && budget !== null ? Math.round((budget - activation.ledger.spentHbar) * 1e8) / 1e8 : null;
+  const budget = activation ? Number.parseFloat(activation.policy.budgetTotal) : Number.NaN;
+  const remaining = activation && Number.isFinite(budget) ? Math.round((budget - activation.ledger.spentHbar) * 1e8) / 1e8 : null;
 
   return (
     <>
@@ -523,13 +531,13 @@ export function App() {
                   <dl className="kv">
                     <dt>mandate</dt>
                     <dd>
-                      {activation.anchored ? (
-                        <a href={activation.hashscan ?? "#"} target="_blank" rel="noreferrer">
+                      {activation.hashscan ? (
+                        <a href={activation.hashscan} target="_blank" rel="noreferrer">
                           anchored on HCS <IconExternal size={12} />
                         </a>
                       ) : (
                         <span className="pill warn">
-                          <IconAlert size={12} /> not anchored: {activation.anchorError}
+                          <IconAlert size={12} /> not anchored{activation.anchorError ? `: ${activation.anchorError}` : ""}
                         </span>
                       )}
                     </dd>
@@ -542,7 +550,7 @@ export function App() {
                 <div className="ledger">
                   <div>
                     <div className="label">budget</div>
-                    <div className="value">{activation ? hbar(activation.policy.budgetTotal) : "–"}</div>
+                    <div className="value">{activation?.policy.budgetTotal ?? "–"}</div>
                   </div>
                   <div>
                     <div className="label">spent</div>
@@ -593,18 +601,31 @@ export function App() {
                 <span className="pill accent">
                   <Spinner size={12} /> running
                 </span>
-              ) : events.length > 0 ? (
-                <button className="btn ghost sm" onClick={() => setEvents([])}>
+              ) : events.length > 0 || runError ? (
+                <button
+                  className="btn ghost sm"
+                  onClick={() => {
+                    setEvents([]);
+                    setRunError(null);
+                  }}
+                >
                   clear
                 </button>
               ) : null}
             </div>
             <Stepper events={events} running={running} />
-            <div className="log" ref={logRef}>
-              {events.length === 0 && <div className="empty">Activate a policy and run a task. Discovery, eligibility, preference, authorization, payment and receipt will appear here with links to HashScan.</div>}
+            <div className="log" ref={logRef} role="log" aria-live="polite" aria-label="agent pipeline events" tabIndex={0}>
+              {events.length === 0 && !runError && (
+                <div className="empty">Activate a policy and run a task. Discovery, eligibility, preference, authorization, payment and receipt will appear here with links to HashScan.</div>
+              )}
               {events.map((ev, i) => (
                 <Event key={i} ev={ev} ranking={ranking} />
               ))}
+              {runError && (
+                <div className="notice bad" style={{ marginTop: 8 }}>
+                  <IconAlert size={16} /> {runError}
+                </div>
+              )}
             </div>
           </section>
         </div>

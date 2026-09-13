@@ -29,4 +29,19 @@ describe("seller listings", () => {
     expect(supplierByLabel("acme-risk")?.priceHbar).toBe(0.03);
     expect(allSuppliers().map((s) => s.label)).toContain("acme-risk");
   });
+
+  it("refuses to store a row the suppliers table cannot price", () => {
+    expect(() =>
+      upsertSupplier({ label: "free-risk", capability: "financial-risk", depth: "pro", priceHbar: 0, deepPriceHbar: 0, payTo: "", context: "" }),
+    ).toThrow();
+    expect(supplierByLabel("free-risk")).toBeUndefined();
+  });
+
+  it("skips a malformed row in the sellers file instead of serving it", () => {
+    const file = process.env.SELLERS_FILE!;
+    const rows = JSON.parse(fs.readFileSync(file, "utf8")) as unknown[];
+    fs.writeFileSync(file, JSON.stringify([...rows, { label: "broken-row" }]));
+    expect(allSuppliers().map((s) => s.label)).not.toContain("broken-row");
+    expect(supplierByLabel("acme-risk")?.priceHbar).toBe(0.03);
+  });
 });

@@ -1,17 +1,16 @@
 import { IDKitRequestWidget, selfieCheckLegacy, type IDKitResult, type RpContext } from "@worldcoin/idkit";
 import { useEffect, useState } from "react";
-import { API, ensExplorer, sepoliaTx, SELLER_WALLET } from "./api";
+import { API, ensExplorer, sepoliaTx } from "./api";
 import { IconAlert, IconArrow, IconCheck, IconExternal, IconShieldCheck, Spinner } from "./icons";
 import { Topbar } from "./Shell";
 
-type Attestation = { name: string; wallet: string; hashedNullifier: string; expiry: number; issuer: string; sig: string };
+type AttestationRecord = { name: string; wallet: string; hashedNullifier: string; expiry: number; issuer: string; sig: string };
 
-type WorldConfig = { action: string; wallet: string; labels?: string[] };
-type SignedWorldRequest = WorldConfig & { rp_context: RpContext };
+type WorldConfig = { action: string; wallet: string; labels: string[] };
+type SignedWorldRequest = { action: string; wallet: string; rp_context: RpContext };
 type RegisterResult = { name: string; owner: string; minted: boolean; mintTx: string | null; recordsTx: string; records: Record<string, string> };
 
-const FALLBACK_WALLET = SELLER_WALLET;
-const FALLBACK_LABELS = ["risk-basic", "risk-pro", "risk-pro-2"];
+const PRICE_KEY = "mandi:price";
 
 const IDKIT_ERRORS: Record<string, string> = {
   user_rejected: "Selfie Check was cancelled in World App. Start again when you are ready.",
@@ -36,43 +35,40 @@ function syncUrl(name: string, wallet: string) {
 }
 
 export function Seller() {
-  const params = new URLSearchParams(location.search);
   const appId = (import.meta.env.VITE_WORLD_APP_ID as string | undefined) ?? "";
-  const [label, setLabel] = useState(params.get("name") ?? "");
-  const [labels, setLabels] = useState<string[]>(FALLBACK_LABELS);
-  const [wallet, setWallet] = useState(params.get("wallet") || FALLBACK_WALLET);
+  const [label, setLabel] = useState(() => new URLSearchParams(location.search).get("name") ?? "");
+  const [labels, setLabels] = useState<string[]>([]);
+  const [wallet, setWallet] = useState(() => new URLSearchParams(location.search).get("wallet") ?? "");
   const [listed, setListed] = useState(false);
   const [listing, setListing] = useState<RegisterResult | null>(null);
   const [rp, setRp] = useState<RpContext | null>(null);
-  const [action, setAction] = useState("mandi-supplier-accreditation");
+  const [action, setAction] = useState("");
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<"register" | "enroll" | "selfie" | null>(null);
+  const [busy, setBusy] = useState<"register" | "enroll" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ attestation: Attestation; ensTx: string | null; ensError: string | null } | null>(null);
+  const [result, setResult] = useState<{ attestation: AttestationRecord; ensTx: string | null; ensError: string | null } | null>(null);
 
   useEffect(() => {
     let alive = true;
     fetch(`${API}/world/config`)
       .then(async (res) => {
-        const body = (await res.json()) as WorldConfig & { error?: string };
+        const body = (await res.json()) as Partial<WorldConfig> & { error?: string };
         if (!alive) return;
+        if (!res.ok) throw new Error(body.error ?? `${res.status}`);
         if (body.labels?.length) setLabels(body.labels);
         if (body.action) setAction(body.action);
-        const next = wallet || body.wallet || FALLBACK_WALLET;
-        if (next) {
-          setWallet(next);
-          syncUrl(label, next);
-        }
+        const configured = body.wallet;
+        if (configured) setWallet((prev) => prev || configured);
       })
-      .catch(() => {
-        if (!alive || !FALLBACK_WALLET) return;
-        setWallet(FALLBACK_WALLET);
-        syncUrl(label, FALLBACK_WALLET);
-      });
+      .catch((err) => alive && setError(err instanceof Error ? err.message : String(err)));
     return () => {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    syncUrl(label, wallet);
+  }, [label, wallet]);
 
   useEffect(() => {
     let alive = true;
@@ -81,7 +77,6 @@ export function Seller() {
     setResult(null);
     setRp(null);
     setOpen(false);
-    syncUrl(label, wallet);
     if (!label) return;
     fetch(`${API}/resolve/${label}.mandi.eth`)
       .then((res) => alive && setListed(res.ok))
@@ -95,7 +90,7 @@ export function Seller() {
     const res = await fetch(`${API}/sellers/register`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ label, depth: "pro", priceHbar: 0.03 }),
+      body: JSON.stringify({ label }),
     });
     const body = (await res.json()) as RegisterResult & { error?: string };
     if (!res.ok) throw new Error(body.error ?? `${res.status}`);
@@ -107,16 +102,14 @@ export function Seller() {
 
   const selfie = async () => {
     const res = await fetch(`${API}/world/rp-signature`, { method: "POST" });
-    const body = (await res.json()) as SignedWorldRequest & RpContext & { error?: string };
+    const body = (await res.json()) as Partial<SignedWorldRequest> & { error?: string };
     if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-    const ctx = body.rp_context ?? (body.rp_id ? { rp_id: body.rp_id, nonce: body.nonce, created_at: body.created_at, expires_at: body.expires_at, signature: body.signature } : null);
-    if (!ctx) throw new Error("rp-signature response missing rp_context");
-    const nextWallet = wallet || body.wallet || FALLBACK_WALLET;
+    if (!body.rp_context) throw new Error("rp-signature response missing rp_context");
+    const nextWallet = wallet || body.wallet || "";
     if (!nextWallet) throw new Error("no seller wallet configured");
     setWallet(nextWallet);
-    syncUrl(label, nextWallet);
     if (body.action) setAction(body.action);
-    setRp(ctx);
+    setRp(body.rp_context);
     setOpen(true);
   };
 
@@ -161,9 +154,10 @@ export function Seller() {
   };
 
   const onChain = listed || !!listing;
-  const step = result ? 3 : open || rp ? 2 : onChain ? 2 : 1;
+  const step = result ? 3 : onChain || rp || open ? 2 : 1;
   const name = label ? `${label}.mandi.eth` : "your-name.mandi.eth";
   const ready = Boolean(label && appId && wallet);
+  const price = listing?.records[PRICE_KEY];
 
   return (
     <>
@@ -202,20 +196,26 @@ export function Seller() {
                 onChange={(e) => setLabel(e.target.value.trim().toLowerCase())}
               />
             </label>
-            <div className="row">
-              {labels.map((item) => (
-                <button key={item} type="button" className={`chip ${item === label ? "on" : ""}`} onClick={() => setLabel(item)} disabled={!!busy || !!result}>
-                  {item}
-                </button>
-              ))}
-            </div>
+            {labels.length > 0 && (
+              <div className="chips" role="group" aria-label="names already in the directory">
+                {labels.map((item) => (
+                  <button key={item} type="button" className={`chip ${item === label ? "on" : ""}`} onClick={() => setLabel(item)} disabled={!!busy || !!result}>
+                    {item}
+                  </button>
+                ))}
+              </div>
+            )}
             <dl className="kv">
               <dt>seller wallet</dt>
               <dd className="mono truncate">{wallet || <span className="pill">resolving seller wallet…</span>}</dd>
               <dt>listing</dt>
               <dd>{onChain ? <span className="pill ok">on ENS</span> : <span className="pill">not minted yet</span>}</dd>
-              <dt>price</dt>
-              <dd>0.03 HBAR / call · same Graph risk scorer as risk-pro</dd>
+              {price && (
+                <>
+                  <dt>price</dt>
+                  <dd className="num">{price} / call</dd>
+                </>
+              )}
             </dl>
             <div className="steps">
               <div className={`stepcard ${onChain ? "done" : "active"}`}>
@@ -304,7 +304,11 @@ export function Seller() {
                 </div>
                 <div className="muted">
                   ENS <span className="mono">mandi:verified</span>:{" "}
-                  {result.ensTx ? <span className="mono">{result.ensTx.slice(0, 18)}…</span> : <span className="pill warn">{result.ensError}</span>}{" "}
+                  {result.ensTx ? (
+                    <span className="mono">{result.ensTx.slice(0, 18)}…</span>
+                  ) : (
+                    <span className="pill warn">{result.ensError ?? "record not written"}</span>
+                  )}{" "}
                   <span className="dim">(display hint only)</span>
                 </div>
                 <pre className="json">{JSON.stringify(result.attestation, null, 2)}</pre>

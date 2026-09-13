@@ -9,8 +9,6 @@ import { hashscanTx, hcsSubmit } from "../hedera";
 import type { Check, Decision, Policy, PurchaseIntent, ServiceCard } from "../types";
 import { getActivePolicy, type ActivePolicy, type Ledger } from "./policy";
 
-const HBAR_ASSET = "0.0.0";
-
 function buyerKey(): PrivateKey {
   const raw = requireEnv("BUYER_KEY");
   if (raw.startsWith("0x")) return PrivateKey.fromStringECDSA(raw);
@@ -33,7 +31,7 @@ export function acceptFilter(capHbar: number): (reqs: readonly PaymentRequiremen
   const cap = Number.isFinite(capHbar) ? toTinybar(capHbar) : null;
   return (reqs) =>
     reqs.filter(
-      (r) => r.network === config.x402.network && r.asset === HBAR_ASSET && (cap === null || BigInt(r.amount) <= cap),
+      (r) => r.network === config.x402.network && r.asset === config.x402.asset && (cap === null || BigInt(r.amount) <= cap),
     );
 }
 
@@ -105,7 +103,7 @@ export function decide(intent: Pick<PurchaseIntent, "supplier" | "route">, ctx: 
     checks.push({
       name: "reliability",
       passed: ctx.reliability.successRate >= ctx.policy.minSuccessRate,
-      detail: `success rate ${(ctx.reliability.successRate * 100).toFixed(1)}% over ${ctx.reliability.sampleSize} settled calls vs minSuccessRate ${(ctx.policy.minSuccessRate * 100).toFixed(0)}%`,
+      detail: `success rate ${(ctx.reliability.successRate * 100).toFixed(1)}% over ${ctx.reliability.sampleSize} anchored calls vs minSuccessRate ${(ctx.policy.minSuccessRate * 100).toFixed(0)}%`,
     });
   } else {
     checks.push({

@@ -3,6 +3,7 @@ import {
   createWalletClient,
   encodeAbiParameters,
   encodeFunctionData,
+  getAbiItem,
   getContractAddress,
   http,
   keccak256,
@@ -16,7 +17,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import { labelhash, namehash, normalize } from "viem/ens";
-import { allSuppliers, assertSellerLabel, config, requireEnv, supplierByLabel, upsertSupplier, type Depth } from "./config";
+import { allSuppliers, assertSellerLabel, config, requireEnv, SELLER_DEFAULTS, supplierByLabel, upsertSupplier, type Depth } from "./config";
 import { formatHbar } from "./hbar";
 import { ServiceCardSchema, type ServiceCard } from "./types";
 
@@ -32,8 +33,6 @@ export const ENSV2 = {
 
 export const ALL_ROLES = BigInt("0x1111111111111111111111111111111111111111111111111111111111111111");
 export const ROLE_SET_RESOLVER = 1n << 24n;
-export const ROLE_SET_TEXT = 1n << 4n;
-export const ROLE_SET_ADDR = 1n << 0n;
 
 export const RECORD_KEYS = {
   agentContext: "agent-context",
@@ -212,15 +211,15 @@ export type RegisterOpts = { depth?: Depth; priceHbar?: number };
 export async function registerService(label: string, opts: RegisterOpts = {}): Promise<RegisterResult> {
   const normalized = assertSellerLabel(label);
   if (!supplierByLabel(normalized)) {
-    const priceHbar = opts.priceHbar ?? 0.03;
+    const priceHbar = opts.priceHbar ?? SELLER_DEFAULTS.priceHbar;
     upsertSupplier({
       label: normalized,
-      capability: "financial-risk",
-      depth: opts.depth ?? "pro",
+      capability: SELLER_DEFAULTS.capability,
+      depth: opts.depth ?? SELLER_DEFAULTS.depth,
       priceHbar,
-      deepPriceHbar: Math.round(priceHbar * 2 * 100) / 100,
+      deepPriceHbar: Math.round(priceHbar * SELLER_DEFAULTS.deepMultiplier * 100) / 100,
       payTo: "",
-      context: "Protocol risk assessment from TVL, utilization and liquidity. Newly registered operator.",
+      context: SELLER_DEFAULTS.context,
     });
   }
   const reader = publicClient();
@@ -309,6 +308,7 @@ const MAX_CHUNK = 1000n;
 const MIN_CHUNK = 10n;
 const REQUESTS_PER_REFRESH = 30;
 const REQUEST_SPACING_MS = 150;
+const labelRegisteredEvent = getAbiItem({ abi: registryAbi, name: "LabelRegistered" });
 const scan: { address?: Address; nextBlock?: bigint; chunk: bigint; labels: Set<string> } = { chunk: MAX_CHUNK, labels: new Set() };
 
 function rangeLimitFrom(message: string): bigint | null {
@@ -333,7 +333,7 @@ export async function registeredLabels(): Promise<string[]> {
     requests += 1;
     if (requests > 1) await sleep(REQUEST_SPACING_MS);
     try {
-      const logs = await client.getLogs({ address, event: registryAbi[8], fromBlock: from, toBlock: to });
+      const logs = await client.getLogs({ address, event: labelRegisteredEvent, fromBlock: from, toBlock: to });
       for (const log of logs) if (log.args.label) scan.labels.add(log.args.label);
       from = to + 1n;
     } catch (err) {
@@ -376,28 +376,37 @@ export function directorySource(): string | null {
   return directoryCache?.source ?? null;
 }
 
+let directoryRefresh: Promise<void> | undefined;
+
+async function refreshDirectory(): Promise<void> {
+  const [fromEvents, verified] = await Promise.all([
+    registeredLabels().catch((err) => {
+      console.warn(`directory: event scan failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
+      return [] as string[];
+    }),
+    labelsOnChain(allSuppliers().map((s) => s.label)),
+  ]);
+  const labels = [...new Set([...fromEvents, ...verified])];
+  const source = fromEvents.length > 0 ? (verified.some((v) => !fromEvents.includes(v)) ? "events+registry-lookup" : "events") : "registry-lookup";
+  const cards: ServiceCard[] = [];
+  for (const label of labels) {
+    try {
+      cards.push(await resolveService(serviceName(label)));
+    } catch (err) {
+      console.warn(`directory skip ${label}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  directoryCache = { at: Date.now(), cards, source };
+}
+
 export async function directory(capability?: string): Promise<string[]> {
   if (!directoryCache || Date.now() - directoryCache.at > 60_000) {
-    const [fromEvents, verified] = await Promise.all([
-      registeredLabels().catch((err) => {
-        console.warn(`directory: event scan failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
-        return [] as string[];
-      }),
-      labelsOnChain(allSuppliers().map((s) => s.label)),
-    ]);
-    const labels = [...new Set([...fromEvents, ...verified])];
-    const source = fromEvents.length > 0 ? (verified.some((v) => !fromEvents.includes(v)) ? "events+registry-lookup" : "events") : "registry-lookup";
-    const cards: ServiceCard[] = [];
-    for (const label of labels) {
-      try {
-        cards.push(await resolveService(serviceName(label)));
-      } catch (err) {
-        console.warn(`directory skip ${label}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-    directoryCache = { at: Date.now(), cards, source };
+    directoryRefresh ??= refreshDirectory().finally(() => {
+      directoryRefresh = undefined;
+    });
+    await directoryRefresh;
   }
-  return directoryCache.cards
+  return directoryCache!.cards
     .filter((card) => !capability || card.capability === capability)
     .map((card) => card.name);
 }

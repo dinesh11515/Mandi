@@ -5,8 +5,6 @@ import { paymentMiddleware, x402ResourceServer } from "@x402/hono";
 import { config, supplierByLabel, type Supplier } from "../config";
 import { toTinybar } from "../hbar";
 
-export const HBAR_ASSET = "0.0.0";
-
 export const facilitator = new HTTPFacilitatorClient({ url: config.x402.facilitatorUrl });
 
 export const resourceServer = new x402ResourceServer(facilitator).register(
@@ -31,7 +29,7 @@ export function priceHbar(info: RouteInfo): number {
 const price = (ctx: { path: string }): Price => {
   const info = routeInfo(ctx.path);
   if (!info) throw new Error(`no price for ${ctx.path}`);
-  return { asset: HBAR_ASSET, amount: toTinybar(priceHbar(info)).toString() };
+  return { asset: config.x402.asset, amount: toTinybar(priceHbar(info)).toString() };
 };
 
 const payTo = (ctx: { path: string }): string => {

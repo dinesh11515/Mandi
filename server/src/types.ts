@@ -6,6 +6,32 @@ export const HbarAmountSchema = z
 
 export type HbarAmount = z.infer<typeof HbarAmountSchema>;
 
+export const EvmAddressSchema = z
+  .string()
+  .regex(/^0x[0-9a-fA-F]{40}$/, "expected an EVM address")
+  .transform((value) => value as `0x${string}`);
+
+export const HexSchema = z
+  .string()
+  .regex(/^0x[0-9a-fA-F]+$/, "expected 0x-prefixed hex")
+  .transform((value) => value as `0x${string}`);
+
+export const DepthSchema = z.enum(["basic", "pro"]);
+
+export type Depth = z.infer<typeof DepthSchema>;
+
+export const SupplierSchema = z.object({
+  label: z.string().min(1),
+  capability: z.string().min(1),
+  depth: DepthSchema,
+  priceHbar: z.number().positive(),
+  deepPriceHbar: z.number().positive(),
+  payTo: z.string(),
+  context: z.string(),
+});
+
+export type Supplier = z.infer<typeof SupplierSchema>;
+
 export const PolicySchema = z
   .object({
     budgetTotal: HbarAmountSchema,
@@ -26,6 +52,25 @@ export const SAMPLE_POLICY = {
   fallbackOnFailure: true,
 } as const satisfies Policy;
 
+export const ActivationRequestSchema = z.object({
+  policy: z.unknown(),
+  expiry: z.number().int().positive().optional(),
+  signature: HexSchema.optional(),
+  signer: EvmAddressSchema.optional(),
+});
+
+export const SellerRegistrationSchema = z.object({
+  label: z.string().min(1),
+  depth: DepthSchema.optional(),
+  priceHbar: z.number().positive().optional(),
+});
+
+export const WorldVerificationSchema = z.object({
+  label: z.string().min(1),
+  wallet: EvmAddressSchema,
+  idkitResponse: z.unknown(),
+});
+
 export const ServiceCardSchema = z.object({
   name: z.string().min(1),
   endpoint: z.string().min(1),
@@ -38,9 +83,13 @@ export const ServiceCardSchema = z.object({
 
 export type ServiceCard = z.infer<typeof ServiceCardSchema>;
 
+export const RouteSchema = z.enum(["/assess", "/assess/deep"]);
+
+export type Route = z.infer<typeof RouteSchema>;
+
 export const PurchaseIntentSchema = z.object({
   supplier: z.string().min(1),
-  route: z.string().min(1),
+  route: RouteSchema,
   protocol: z.string().min(1),
   policyHash: z.string().length(64),
 });

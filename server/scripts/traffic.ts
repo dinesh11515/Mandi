@@ -1,6 +1,6 @@
 import { decodePaymentResponseHeader } from "@x402/fetch";
 import { paidFetch } from "../src/buyer/executor";
-import { config, SUPPLIERS } from "../src/config";
+import { allSuppliers, config } from "../src/config";
 
 const rounds = Number(process.argv[2] ?? 3);
 const protocol = process.argv[3] ?? "aave";
@@ -10,7 +10,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Row = { supplier: string; calls: number; fulfilled: number; settled: number; totalHbar: number; latencyMs: number[] };
 
 async function main() {
-  const targets = SUPPLIERS.filter((s) => !only || only.includes(s.label));
+  const targets = allSuppliers().filter((s) => !only || only.includes(s.label));
   const rows = new Map<string, Row>(targets.map((s) => [s.label, { supplier: s.label, calls: 0, fulfilled: 0, settled: 0, totalHbar: 0, latencyMs: [] }]));
   const fetchPaid = paidFetch();
   for (let round = 1; round <= rounds; round += 1) {
