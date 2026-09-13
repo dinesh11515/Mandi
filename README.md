@@ -4,8 +4,8 @@
 
 Mandi is a procurement layer for autonomous agents: agents discover competing suppliers through ENS names, and a deterministic policy executor — the only thing holding the payment key — decides whether each call gets paid for, over x402 on Hedera.
 
-- **Live console:** https://mandiserver-production.up.railway.app
-- **Seller page:** https://mandiserver-production.up.railway.app/seller
+- **Live console:** https://mandi.up.railway.app
+- **Seller page:** https://mandi.up.railway.app/seller
 - **Audit trail:** https://hashscan.io/testnet/topic/0.0.10454931
 - **Names:** https://explorer.ens.dev/name/mandi.eth
 
@@ -238,7 +238,7 @@ Other commands: `pnpm test` (vitest), `pnpm typecheck` (both packages), `pnpm bu
 
 ### Using the live deployment
 
-Both journeys work in a browser at https://mandiserver-production.up.railway.app. You need MetaMask; signatures are `personal_sign`, so **no Sepolia ETH is required** — the server pays gas for the mint and the records. To buy, you need test HBAR in that same account, and `cd server && pnpm exec tsx scripts/fund-evm.ts 0xYourAddress 5` seeds it from the operator. Selfie Check needs World App on a phone, and asks the same wallet for a second signature, so keep it connected.
+Both journeys work in a browser at https://mandi.up.railway.app. You need MetaMask; signatures are `personal_sign`, so **no Sepolia ETH is required** — the server pays gas for the mint and the records. To buy, you need test HBAR in that same account, and `cd server && pnpm exec tsx scripts/fund-evm.ts 0xYourAddress 5` seeds it from the operator. Selfie Check needs World App on a phone, and asks the same wallet for a second signature, so keep it connected.
 
 On the console: activate the policy and sign the mandate, deposit from MetaMask, then type a task like `Assess risk of Aave` and watch discovery, eligibility, authorization, payment and receipts stream in. Read the refusals — a rejected decision lists every reason, and if `funding` is the one that failed, deposit more. A run that stops before its first event means the run token was refused; activate again.
 
